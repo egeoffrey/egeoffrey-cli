@@ -10,9 +10,11 @@ import subprocess
 import requests
 
 ## constants
-VERSION = 1.0
+VERSION = "development"
+REVISION = 1
 DEFAULT_MYHOUSE_VERSION = "development"
 MARKETPLACE_URL = "https://api.github.com/repos/myhouse-project/myhouse-marketplace/contents/marketplace"
+MY_MANIFEST_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+VERSION+"/manifest.yml"
 MY_DIRECTORY= os.path.dirname(os.path.realpath(__file__))
 ENV_FILE = MY_DIRECTORY+"/.env"
 DOCKER_COMPOSE_FILE = MY_DIRECTORY+"/docker-compose.yml"
@@ -57,10 +59,10 @@ def load_env():
             # store it into the env variable
             env[split[0]] = split[1]
     except Exception,e: 
-        print_error("unable to read enviroment file from "+ENV_FILE+": "+str(e))
+        print_error("unable to read environment file from "+ENV_FILE+": "+str(e))
     print_debug("Loaded "+str(len(env))+" env settings")
     if "VERSION" not in env:
-        print_error("invalid enviroment file")
+        print_error("invalid environment file")
 
 # parse command line arguments
 def parse_command_line():
@@ -93,6 +95,7 @@ def get_manifest(package, repo):
     try:
         manifest_url = "https://raw.githubusercontent.com/"+repo+"/"+env["VERSION"]+"/manifest.yml?timestamp="+str(int(time.time()))
         response = requests.get(manifest_url)
+        if response.status_code != 200: print_error("Unable to download manifest of "+repo)
         return yaml.load(response.content, Loader=yaml.SafeLoader)
     except Exception,e:
         print_error("Unable to download manifest of "+repo+": "+str(e))
@@ -105,6 +108,7 @@ def list_marketplace():
     try:
         # list all files in the marketplace database
         response = requests.get(MARKETPLACE_URL)
+        if response.status_code != 200: print_error("Unable to list marketplace items")
         content = json.loads(response.content)
         # for each package in the marketplace
         for entry in content:
@@ -120,6 +124,7 @@ def get_repository(package):
     try: 
         # download from the marketplace the file for the package
         response = requests.get("https://raw.githubusercontent.com/myhouse-project/myhouse-marketplace/master/marketplace/"+package+".yml?timestamp="+str(int(time.time())))
+        if response.status_code != 200: print_error("Unable to retrieve github repository for package "+package)
         content = yaml.load(response.content, Loader=yaml.SafeLoader)
         if "github" not in content: return None
         return content["github"]
@@ -219,6 +224,7 @@ def print_usage():
     print_output("  stop                Stop running services")
     print_output("  update              Update the installed package(s)")
     print_output("  uninstall           Uninstall the provided package(s)")
+    print_output("  upgrade             upgrade myhouse-cli to the latest version")
     print_output("  version             Print out this script version")
         
 ## MAIN ##
@@ -374,11 +380,22 @@ elif command == "uninstall":
     # save the updated configuration file
     save_configuration()
     
+# upgrade myhouse-cli to the latest version
+elif command == "upgrade":
+    # download the manifest from github
+    print_debug("Downloading manifest from "+MY_MANIFEST_URL)
+    try:
+        response = requests.get(MY_MANIFEST_URL)
+        if response.status_code != 200: print_error("Unable to download myhouse-cli manifest")
+        manifest =  yaml.load(response.content, Loader=yaml.SafeLoader)
+    except Exception,e:
+        print_error("Unable to download myhouse-cli manifest: "+str(e))
+    print str(manifest)
+
+    
 # print out this script version
 elif command == "version":
-    print_output("myhouse-cli v"+str(VERSION))
+    print_output("myhouse-cli "+VERSION+"-"+str(REVISION))
             
 else:
     print_usage()
-            
-            
