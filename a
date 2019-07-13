@@ -392,7 +392,7 @@ elif command == "upgrade":
     except Exception,e:
         print_error("Unable to download myhouse-cli manifest: "+str(e))
     # if we are at the latest version, just exit
-    if manifest["revision"] == REVISION:
+    if manifest["revision"] > REVISION:
         print_output("Already at the latest version ("+VERSION+"-"+str(REVISION)+")")
     # upgrade needed
     else:
