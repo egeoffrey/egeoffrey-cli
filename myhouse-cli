@@ -1,0 +1,384 @@
+#!/usr/bin/python
+
+import sys
+import os
+import re
+import time
+import json
+import yaml
+import subprocess
+import requests
+
+## constants
+VERSION = 1.0
+DEFAULT_MYHOUSE_VERSION = "development"
+MARKETPLACE_URL = "https://api.github.com/repos/myhouse-project/myhouse-marketplace/contents/marketplace"
+MY_DIRECTORY= os.path.dirname(os.path.realpath(__file__))
+ENV_FILE = MY_DIRECTORY+"/.env"
+DOCKER_COMPOSE_FILE = MY_DIRECTORY+"/docker-compose.yml"
+
+## variables
+# debug output 
+debug = False
+# requested command
+command = ""
+# arguments to the requested command
+arguments = ""
+# docker-compose .env 
+env = {}
+# docker-compose configuration
+config = {}
+
+# print out an error message and exit
+def print_error(message):
+    print "ERROR: "+str(message)
+    exit(1)
+    
+# print out a debug message
+def print_debug(message):
+    global debug
+    if debug: print message
+
+# print out a message    
+def print_output(message):
+    print message
+    
+# load .env file with common docker-compose environment variables
+def load_env():
+    global env, ENV_FILE
+    try:
+        with open(ENV_FILE) as f: content = f.read()
+        for line in content.split("\n"):
+            # clean up the file
+            line = re.sub(' +',' ', line).replace('"', "")
+            if line.startswith("#"): continue
+            if "=" not in line: continue
+            split = line.split("=")
+            # store it into the env variable
+            env[split[0]] = split[1]
+    except Exception,e: 
+        print_error("unable to read enviroment file from "+ENV_FILE+": "+str(e))
+    print_debug("Loaded "+str(len(env))+" env settings")
+    if "VERSION" not in env:
+        print_error("invalid enviroment file")
+
+# parse command line arguments
+def parse_command_line():
+    global command, arguments, debug
+    skip_next = False
+    for i in range(1, len(sys.argv)):
+        if skip_next: 
+            skip_next = False
+            continue
+        arg = sys.argv[i]
+        arg = re.sub(' +',' ', arg)
+        if arg == "-b":
+            DEFAULT_MYHOUSE_VERSION = sys.argv[i+1]
+            skip_next = True
+            continue
+        if arg == "-v":
+            debug = True
+            continue
+        if command == "":
+            command = arg
+            continue
+        arguments = arguments+" "+arg
+    arguments = arguments.strip()
+    print_debug("Command: "+command)
+    print_debug("Arguments: "+arguments)
+
+# download and return a manifest from a remote git repository
+def get_manifest(package, repo):
+    print_debug("Loading manifest file for package "+package)
+    try:
+        manifest_url = "https://raw.githubusercontent.com/"+repo+"/"+env["VERSION"]+"/manifest.yml?timestamp="+str(int(time.time()))
+        response = requests.get(manifest_url)
+        return yaml.load(response.content, Loader=yaml.SafeLoader)
+    except Exception,e:
+        print_error("Unable to download manifest of "+repo+": "+str(e))
+    
+
+# return an array of registered packages in the marketplace
+def list_marketplace():
+    index = []
+    print_debug("Listing Marketplace items...")
+    try:
+        # list all files in the marketplace database
+        response = requests.get(MARKETPLACE_URL)
+        content = json.loads(response.content)
+        # for each package in the marketplace
+        for entry in content:
+            if "path" not in entry or "name" not in entry: continue
+            index.append(entry["name"].replace(".yml", ""))
+        print_debug("Marketplace has "+str(len(content))+" entries")
+        return index
+    except Exception,e:
+        print_error("Unable to list marketplace items: "+str(e))
+
+# return the github repo of a marketplace package 
+def get_repository(package):
+    try: 
+        # download from the marketplace the file for the package
+        response = requests.get("https://raw.githubusercontent.com/myhouse-project/myhouse-marketplace/master/marketplace/"+package+".yml?timestamp="+str(int(time.time())))
+        content = yaml.load(response.content, Loader=yaml.SafeLoader)
+        if "github" not in content: return None
+        return content["github"]
+    except Exception,e:
+        print_error("Unable to retrieve github repository for package "+package+": "+str(e))
+        
+    
+# build the marketplace database
+def get_marketplace(packages=None):
+    global env
+    marketplace = {}
+    # get the list of all items in the marketplace
+    index = list_marketplace()
+    try:
+        # for each package in the marketplace
+        for i in range(0, len(index)):
+            package = index[i]
+            # if we need to download the entire marketplace, show the user our progresses
+            if packages is None:
+                msg = "Downloading marketplace data: "+str( (i+1)*100/len(index) )+"%"
+                sys.stdout.write('\r')
+                sys.stdout.write(msg)
+                sys.stdout.flush()
+                if i == len(index)-1: sys.stdout.write('\n')
+            # filter out not requested packages
+            if packages is not None and package not in packages: continue
+            # download the marketplace item which contains the github repo reference
+            repository = get_repository(package)
+            if repository is None: continue
+            # download the manifest from the remote repository
+            manifest = get_manifest(package, repository)
+            # populate the marketplace
+            marketplace[package] = manifest
+        return marketplace
+    except Exception,e:
+        print_error("Unable to build marketplace index: "+str(e))
+        
+# load docker-compose configuration
+def load_configuration():
+    global DOCKER_COMPOSE_FILE, config
+    # if docker-compose.yml does not exist, make an empty version
+    if not os.path.isfile(DOCKER_COMPOSE_FILE): 
+        config = {
+            "version": "3",
+            "services": {},
+            "networks": {
+                "myhouse": {
+                    "driver": "bridge"
+                }
+            }
+        }
+    else:
+        print_debug("Loading docker-compose configuration from "+DOCKER_COMPOSE_FILE)
+        try:
+            with open(DOCKER_COMPOSE_FILE) as f: content = f.read()
+            config = yaml.load(content, Loader=yaml.SafeLoader)
+        except Exception,e:
+            print_error("Unable to load myHouse docker configuration: "+str(e))
+        
+# save docker-compose configuration
+def save_configuration():
+    global DOCKER_COMPOSE_FILE, config
+    print_debug("Saving docker-compose configuration to "+DOCKER_COMPOSE_FILE)
+    try: 
+        f = open(DOCKER_COMPOSE_FILE, "w")
+        f.write(yaml.safe_dump(config, default_flow_style=False))
+        f.close()
+    except Exception,e:
+        print_error("Unable to save myHouse docker configuration: "+str(e))
+       
+# run docker-compose
+def run_docker_compose(args):
+    global DOCKER_COMPOSE_FILE
+    subprocess.call(["docker-compose", "-f", DOCKER_COMPOSE_FILE] + args)
+    
+# run docker
+def run_docker(args):
+    subprocess.call(["docker"] + args)
+       
+# print usage
+def print_usage():
+    print_output("Usage: myhouse-cli [OPTIONS] COMMAND ARGUMENTS")
+    print_output("  -b\tset myHouse version")
+    print_output("  -v\tenable debug mode")
+    print_output("")
+    print_output("Commands:")
+    print_output("  info                Print out information on a given package")
+    print_output("  install             Install the provided package(s)")
+    print_output("  list_available      List available packages that can be installed")
+    print_output("  list_installed      List already installed packages")
+    print_output("  logs                Print out log information")
+    print_output("  reload              Reload the configuration")
+    print_output("  search              Search packages matching the provided description")
+    print_output("  start               Start configured services")
+    print_output("  stats               Print out running packages CPU and memory utilization")
+    print_output("  status              Show currently running components")
+    print_output("  stop                Stop running services")
+    print_output("  update              Update the installed package(s)")
+    print_output("  uninstall           Uninstall the provided package(s)")
+    print_output("  version             Print out this script version")
+        
+## MAIN ##
+
+# load docker-compose common variables
+load_env()
+# load docker-compose configuration
+load_configuration()
+# parse provided command line
+parse_command_line()
+
+# do what requested by the user
+
+# print out information on a given package
+if command == "info":
+    package = arguments
+    if package == "": print_error("a package name must be provided")
+    marketplace = get_marketplace([package])
+    if package not in marketplace: print_error("package "+package+" not found")
+    manifest = marketplace[package]
+    print_output("Package: "+manifest["package"])
+    print_output("Tags: "+manifest["tags"])
+    print_output("Version: "+str(manifest["version"])+"-"+str(manifest["revision"]))
+    print_output("Github: https://github.com/"+manifest["github"])
+    print_output("Docker: "+manifest["dockerhub"])
+    print_output("Modules: "+", ".join(manifest["modules"]))
+    print_output("")
+    print_output(manifest["description"])
+    print_output("")
+    
+# install a package
+elif command == "install":
+    packages = arguments.split(" ")
+    if len(packages) == 0: print_error("at least a package name must be provided")
+    marketplace = get_marketplace(packages)
+    for package in packages:
+        # ensure package is not already installed
+        if package in config["services"]:
+            print_output(package+" is already installed")
+            continue
+        # ensure package exists in the marketplace
+        if package not in marketplace:
+            print_output(package+" not found in the marketplace, skipping")
+            continue
+        # add the package to the docker-compose file
+        try:
+            service = {}
+            manifest =  marketplace[package]
+            print_debug("Installing package "+package)
+            # if runtime parameters are provided, merge them with the service
+            if "container_config" in manifest: 
+                print_debug("Container default runtime: "+str(manifest["container_config"]))
+                service.update(manifest["container_config"])
+            # add env_file
+            service["env_file"] = ".env"
+            # add image
+            service["image"] = manifest["dockerhub"]+":${ARCHITECTURE}-${VERSION}"
+            # add MYHOUSE_MODULES variable
+            if "modules" in manifest and len(manifest["modules"]) > 0:
+                if "environment" not in service: service["environment"] = []
+                service["environment"].append("MYHOUSE_MODULES="+", ".join(manifest["modules"]))
+            # link to the default bridge network if no other instructions are provided
+            if "network_mode" not in service and "networks" not in service:
+                service["networks"] = []
+                service["networks"].append("myhouse")
+            # if there is a volume mapping, create the local MY_DIRECTORY
+            if "volumes" in service:
+                for volume in service["volumes"]:
+                    volume = volume.replace('"', "")
+                    split = volume.split(":")
+                    MY_DIRECTORY = split[0]
+                    if not os.path.exists(MY_DIRECTORY):
+                        print_debug("Creating MY_DIRECTORY "+MY_DIRECTORY)
+                        os.makedirs(MY_DIRECTORY)
+            if "devices" in service:
+                for device in service["devices"]:
+                    device = device.replace('"', "")
+                    split = device.split(":")
+                    print_output("Please ensure the mapped device "+split[0]+" exists")
+            # the docker daemon will restart the service at boot time
+            #service["restart"] = "always"
+            # add the new service
+            config["services"][package] = service
+        except Exception,e:
+            print_error("installation of package "+package+" failed: "+str(e))
+        print_output(package+" installed successfully")
+    # save the updated configuration file
+    save_configuration()
+    
+# list packages available to install
+elif command == "list_available":
+    marketplace = get_marketplace()
+    for package in sorted(marketplace):
+        # skip already installed packages
+        if package in config["services"]: continue
+        print_output(package+": "+marketplace[package]["description"])
+
+# list packages already installed
+elif command == "list_installed":
+    for service in sorted(config["services"]):
+        print_output(service)
+        
+# run docker logs
+elif command == "logs":
+    options = arguments.split(" ") if arguments != "" else []
+    run_docker_compose(["logs"]+options)
+    
+# reload the configuration
+elif command == "reload":
+    run_docker_compose(["up", "-d", "--remove-orphans"])
+
+# search for a package
+elif command == "search":
+    marketplace = get_marketplace()
+    for package in sorted(marketplace):
+        if arguments in marketplace[package]["description"] or arguments in marketplace[package]["tags"]:
+            print_output(package+": "+marketplace[package]["description"])
+            
+# start services
+elif command == "start":
+    packages = arguments.split(" ") if arguments != "" else []
+    run_docker_compose(["up", "-d", "--remove-orphans"]+packages)
+    
+# run docker stats
+elif command == "stats":
+    run_docker(["stats", "--no-stream"])
+
+# run docker ps
+elif command == "status":
+    run_docker_compose(["ps"])
+
+# stop services
+elif command == "stop":
+    run_docker_compose(["down"])
+    
+# update an installed packages
+elif command == "update":
+    packages = arguments.split(" ") if arguments != "" else []
+    run_docker_compose(["pull"]+packages)
+    
+# uninstall a package
+elif command == "uninstall":
+    packages = arguments.split(" ")
+    if len(packages) == 0: print_error("at least a package name must be provided")
+    for package in packages:
+        # ensure package is installed
+        if package not in config["services"]:
+            print_output(package+" is not installed")
+            continue
+        # remove the package from the docker-compose file
+        del config["services"][package]
+        print_output(package+" uninstalled successfully")
+    # save the updated configuration file
+    save_configuration()
+    
+# print out this script version
+elif command == "version":
+    print_output("myhouse-cli v"+str(VERSION))
+            
+else:
+    print_usage()
+            
+            
