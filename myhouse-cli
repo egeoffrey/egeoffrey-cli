@@ -17,7 +17,6 @@ MARKETPLACE_URL = "https://api.github.com/repos/myhouse-project/myhouse-marketpl
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+VERSION+"/manifest.yml"
 MY_DOWNLOAD_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+VERSION+"/myhouse-cli"
 MY_DIRECTORY = os.path.dirname(os.path.realpath(__file__))
-DOCKER_COMPOSE_FILE = MY_DIRECTORY+"/docker-compose.yml"
 
 ## variables
 # debug output 
@@ -304,10 +303,10 @@ elif command == "install":
                 for volume in service["volumes"]:
                     volume = volume.replace('"', "")
                     split = volume.split(":")
-                    MY_DIRECTORY = split[0]
-                    if not os.path.exists(MY_DIRECTORY):
-                        print_debug("Creating MY_DIRECTORY "+MY_DIRECTORY)
-                        os.makedirs(MY_DIRECTORY)
+                    directory = split[0]
+                    if not os.path.exists(directory):
+                        print_debug("Creating directory "+directory)
+                        os.makedirs(directory)
             if "devices" in service:
                 for device in service["devices"]:
                     device = device.replace('"', "")
