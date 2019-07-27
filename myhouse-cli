@@ -11,12 +11,12 @@ import requests
 
 ## constants
 VERSION = "development"
-REVISION = 2
+REVISION = 4
 DEFAULT_MYHOUSE_VERSION = "development"
 MARKETPLACE_URL = "https://api.github.com/repos/myhouse-project/myhouse-marketplace/contents/marketplace"
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+VERSION+"/manifest.yml"
 MY_DOWNLOAD_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+VERSION+"/myhouse-cli"
-MY_DIRECTORY = os.path.dirname(os.path.realpath(__file__))
+MY_DIRECTORY = os.getcwd()
 
 ## variables
 # debug output 
@@ -32,8 +32,12 @@ config = {}
 
 # print out an error message and exit
 def print_error(message):
-    print "ERROR: "+str(message)
+    print "\033[91mERROR\033[0m: "+str(message)
     exit(1)
+    
+# print out a warning message
+def print_warning(message):
+    print "\033[33mWARNING\033[0m: "+str(message)
     
 # print out a debug message
 def print_debug(message):
@@ -48,6 +52,8 @@ def print_output(message):
 def load_env():
     global env
     env_file = MY_DIRECTORY+"/.env"
+    if not os.path.isfile(env_file):
+        print_error("the configuration file '.env' cannot be found in the current directory. Please switch into myHouse installation directory or provide the directory with the -d option")
     try:
         with open(env_file) as f: content = f.read()
         for line in content.split("\n"):
@@ -149,7 +155,7 @@ def get_marketplace(packages=None):
             package = index[i]
             # if we need to download the entire marketplace, show the user our progresses
             if packages is None:
-                msg = "Downloading marketplace data: "+str( (i+1)*100/len(index) )+"%"
+                msg = "Downloading marketplace database: "+str( (i+1)*100/len(index) )+"%"
                 sys.stdout.write('\r')
                 sys.stdout.write(msg)
                 sys.stdout.flush()
@@ -210,6 +216,21 @@ def run_docker_compose(args):
 # run docker
 def run_docker(args):
     subprocess.call(["docker"] + args)
+    
+# check if the cli requires to be upgraded
+def requires_upgrade():
+    # download the manifest from github which contains the latest version number
+    print_debug("Downloading myhouse-cli manifest from "+MY_MANIFEST_URL)
+    try:
+        response = requests.get(MY_MANIFEST_URL+"?timestamp="+str(int(time.time())))
+        if response.status_code != 200: print_error("Unable to download myhouse-cli manifest")
+        manifest =  yaml.load(response.content, Loader=yaml.SafeLoader)
+    except Exception,e:
+        print_error("Unable to download myhouse-cli manifest: "+str(e))
+    # check if we are at the latest version
+    print_debug("myhouse-cli latest release v"+str(manifest["revision"])+", currently running v"+str(REVISION))
+    if manifest["revision"] > REVISION: return True
+    return False
        
 # print usage
 def print_usage():
@@ -239,6 +260,8 @@ def print_usage():
 
 # parse provided command line
 parse_command_line()
+# check if running the latest version
+if requires_upgrade(): print_warning("a new version of myhouse-cli is available, run 'myhouse-cli upgrade' to upgrade")
 # load docker-compose common variables
 load_env()
 # load docker-compose configuration
@@ -258,7 +281,11 @@ if command == "info":
     print_output("Version: "+str(manifest["version"])+"-"+str(manifest["revision"]))
     print_output("Github: https://github.com/"+manifest["github"])
     print_output("Docker: "+manifest["dockerhub"])
-    print_output("Modules: "+", ".join(manifest["modules"]))
+    modules = []
+    for module_object in manifest["modules"]:
+        for module in module_object:
+            modules.append(module)
+    print_output("Modules: "+", ".join(modules))
     print_output("")
     print_output(manifest["description"])
     print_output("")
@@ -291,9 +318,14 @@ elif command == "install":
             # add image
             service["image"] = manifest["dockerhub"]+":${ARCHITECTURE}-${VERSION}"
             # add MYHOUSE_MODULES variable
-            if "modules" in manifest and len(manifest["modules"]) > 0:
-                if "environment" not in service: service["environment"] = []
-                service["environment"].append("MYHOUSE_MODULES="+", ".join(manifest["modules"]))
+            if "modules" in manifest:
+                modules = []
+                for module_object in manifest["modules"]:
+                    for module in module_object:
+                        modules.append(module)
+                if len(modules) > 0:
+                    if "environment" not in service: service["environment"] = []
+                    service["environment"].append("MYHOUSE_MODULES="+", ".join(modules))
             # link to the default bridge network if no other instructions are provided
             if "network_mode" not in service and "networks" not in service:
                 service["networks"] = []
@@ -390,19 +422,8 @@ elif command == "uninstall":
     
 # upgrade myhouse-cli to the latest version
 elif command == "upgrade":
-    # download the manifest from github which contains the latest version number
-    print_debug("Downloading manifest from "+MY_MANIFEST_URL)
-    try:
-        response = requests.get(MY_MANIFEST_URL+"?timestamp="+str(int(time.time())))
-        if response.status_code != 200: print_error("Unable to download myhouse-cli manifest")
-        manifest =  yaml.load(response.content, Loader=yaml.SafeLoader)
-    except Exception,e:
-        print_error("Unable to download myhouse-cli manifest: "+str(e))
-    # if we are at the latest version, just exit
-    if manifest["revision"] == REVISION:
-        print_output("Already at the latest version ("+VERSION+"-"+str(REVISION)+")")
     # upgrade needed
-    else:
+    if requires_upgrade():
         # download the latest version
         try:
             response = requests.get(MY_DOWNLOAD_URL+"?timestamp="+str(int(time.time())))
@@ -414,6 +435,8 @@ elif command == "upgrade":
         f.write(response.content)
         f.close()
         print_output("Upgrade to version "+manifest["version"]+"-"+str(manifest["revision"])+" successful")
+    else:
+        print_output("Already at the latest version ("+VERSION+"-"+str(REVISION)+")")
 
 # print out this script version
 elif command == "version":
