@@ -11,7 +11,7 @@ import requests
 
 ## constants
 VERSION = "development"
-REVISION = 5
+REVISION = 6
 DEFAULT_MYHOUSE_VERSION = "development"
 MARKETPLACE_URL = "https://api.github.com/repos/myhouse-project/myhouse-marketplace/contents/marketplace"
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+VERSION+"/manifest.yml"
@@ -177,6 +177,8 @@ def get_marketplace(packages=None):
 def load_configuration():
     global config
     docker_compose_file = MY_DIRECTORY+"/docker-compose.yml"
+    # load docker-compose common variables
+    load_env()
     # if docker-compose.yml does not exist, make an empty version
     if not os.path.isfile(docker_compose_file): 
         config = {
@@ -267,15 +269,12 @@ def print_usage():
 parse_command_line()
 # check if running the latest version
 if requires_upgrade(): print_warning("a new version of myhouse-cli is available, run 'myhouse-cli upgrade' to upgrade")
-# load docker-compose common variables
-load_env()
-# load docker-compose configuration
-load_configuration()
 
 # do what requested by the user
 
 # print out information on a given package
 if command == "info":
+    load_configuration()
     package = arguments
     if package == "": print_error("a package name must be provided")
     marketplace = get_marketplace([package])
@@ -297,6 +296,7 @@ if command == "info":
     
 # install a package
 elif command == "install":
+    load_configuration()
     packages = arguments.split(" ")
     if len(packages) == 0: print_error("at least a package name must be provided")
     marketplace = get_marketplace(packages)
@@ -361,6 +361,7 @@ elif command == "install":
     
 # list packages available to install
 elif command == "list_available":
+    load_configuration()
     marketplace = get_marketplace()
     for package in sorted(marketplace):
         # skip already installed packages
@@ -369,20 +370,24 @@ elif command == "list_available":
 
 # list packages already installed
 elif command == "list_installed":
+    load_configuration()
     for service in sorted(config["services"]):
         print_output(service)
         
 # run docker logs
 elif command == "logs":
+    load_configuration()
     options = arguments.split(" ") if arguments != "" else []
     run_docker_compose(["logs"]+options)
     
 # reload the configuration
 elif command == "reload":
+    load_configuration()
     run_docker_compose(["up", "-d", "--remove-orphans"])
 
 # search for a package
 elif command == "search":
+    load_configuration()
     marketplace = get_marketplace()
     for package in sorted(marketplace):
         if arguments in marketplace[package]["description"] or arguments in marketplace[package]["tags"]:
@@ -390,15 +395,18 @@ elif command == "search":
             
 # start services
 elif command == "start":
+    load_configuration()
     packages = arguments.split(" ") if arguments != "" else []
     run_docker_compose(["up", "-d", "--remove-orphans"]+packages)
     
 # run docker stats
 elif command == "stats":
+    load_configuration()
     run_docker(["stats", "--no-stream"])
 
 # run docker ps
 elif command == "status":
+    load_configuration()
     run_docker_compose(["ps"])
 
 # stop services
@@ -407,11 +415,13 @@ elif command == "stop":
     
 # update an installed packages
 elif command == "update":
+    load_configuration()
     packages = arguments.split(" ") if arguments != "" else []
     run_docker_compose(["pull"]+packages)
     
 # uninstall a package
 elif command == "uninstall":
+    load_configuration()
     packages = arguments.split(" ")
     if len(packages) == 0: print_error("at least a package name must be provided")
     for package in packages:
