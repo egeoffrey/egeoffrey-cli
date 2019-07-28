@@ -11,7 +11,7 @@ import requests
 
 ## constants
 VERSION = "development"
-REVISION = 4
+REVISION = 5
 DEFAULT_MYHOUSE_VERSION = "development"
 MARKETPLACE_URL = "https://api.github.com/repos/myhouse-project/myhouse-marketplace/contents/marketplace"
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+VERSION+"/manifest.yml"
@@ -53,7 +53,7 @@ def load_env():
     global env
     env_file = MY_DIRECTORY+"/.env"
     if not os.path.isfile(env_file):
-        print_error("the configuration file '.env' cannot be found in the current directory. Please switch into myHouse installation directory or provide the directory with the -d option")
+        print_error("the configuration file '.env' cannot be found in "+env_file+". Please switch into myHouse installation directory or provide the directory with the -d option")
     try:
         with open(env_file) as f: content = f.read()
         for line in content.split("\n"):
@@ -210,8 +210,13 @@ def save_configuration():
        
 # run docker-compose
 def run_docker_compose(args):
+    current_dir = os.getcwd()
+    # when docker-compose runs in a container cannot mount the target directory, let's chdir into it first
+    os.chdir(MY_DIRECTORY)
     docker_compose_file = MY_DIRECTORY+"/docker-compose.yml"
     subprocess.call(["docker-compose", "-f", docker_compose_file] + args)
+    # get back to the original directory
+    os.chdir(current_dir)
     
 # run docker
 def run_docker(args):
@@ -431,7 +436,7 @@ elif command == "upgrade":
         except Exception,e:
             print_error("Unable to download the newest version of myhouse-cli: "+str(e))
         # replace this file
-        f = open(MY_DIRECTORY+"/myhouse-cli", "w")
+        f = open("/usr/local/bin/myhouse-cli", "w")
         f.write(response.content)
         f.close()
         print_output("Upgrade to version "+manifest["version"]+"-"+str(manifest["revision"])+" successful")
