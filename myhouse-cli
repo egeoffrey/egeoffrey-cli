@@ -236,8 +236,8 @@ def requires_upgrade():
         print_error("Unable to download myhouse-cli manifest: "+str(e))
     # check if we are at the latest version
     print_debug("myhouse-cli latest release v"+str(manifest["revision"])+", currently running v"+str(REVISION))
-    if manifest["revision"] > REVISION: return True
-    return False
+    if manifest["revision"] > REVISION: return manifest["revision"]
+    return None
        
 # print usage
 def print_usage():
@@ -268,7 +268,7 @@ def print_usage():
 # parse provided command line
 parse_command_line()
 # check if running the latest version
-if requires_upgrade(): print_warning("a new version of myhouse-cli is available, run 'myhouse-cli upgrade' to upgrade")
+if requires_upgrade() is not None: print_warning("a new version of myhouse-cli is available, run 'myhouse-cli upgrade' to upgrade")
 
 # do what requested by the user
 
@@ -438,7 +438,8 @@ elif command == "uninstall":
 # upgrade myhouse-cli to the latest version
 elif command == "upgrade":
     # upgrade needed
-    if requires_upgrade():
+    version = requires_upgrade()
+    if version is not None:
         # download the latest version
         try:
             response = requests.get(MY_DOWNLOAD_URL+"?timestamp="+str(int(time.time())))
@@ -446,10 +447,13 @@ elif command == "upgrade":
         except Exception,e:
             print_error("Unable to download the newest version of myhouse-cli: "+str(e))
         # replace this file
-        f = open("/usr/local/bin/myhouse-cli", "w")
-        f.write(response.content)
-        f.close()
-        print_output("Upgrade to version "+manifest["version"]+"-"+str(manifest["revision"])+" successful")
+        try:
+            f = open("/usr/local/bin/myhouse-cli", "w")
+            f.write(response.content)
+            f.close()
+        except Exception,e:
+            print_error("Unable to install the latest version: "+str(e))
+        print_output("Upgrade to version "+VERSION+"-"+str(version)+" successful")
     else:
         print_output("Already at the latest version ("+VERSION+"-"+str(REVISION)+")")
 
