@@ -10,13 +10,15 @@ import subprocess
 import requests
 
 ## constants
-VERSION = "development"
-REVISION = 6
-DEFAULT_MYHOUSE_VERSION = "development"
+BRANCH = "development"
+VERSION = 1.0
+REVISION = 7
 MARKETPLACE_URL = "https://api.github.com/repos/myhouse-project/myhouse-marketplace/contents/marketplace"
-MY_MANIFEST_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+VERSION+"/manifest.yml"
-MY_DOWNLOAD_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+VERSION+"/myhouse-cli"
+MARKETPLACE_BRANCH = "master"
+MY_MANIFEST_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+BRANCH+"/version.yml"
+MY_DOWNLOAD_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+BRANCH+"/myhouse-cli"
 MY_DIRECTORY = os.getcwd()
+SUPPORTED_MANIFEST_SCHEMA = 2
 
 ## variables
 # debug output 
@@ -48,6 +50,47 @@ def print_debug(message):
 def print_output(message):
     print message
     
+# parse command line arguments
+def parse_command_line():
+    global command, arguments, debug, MY_DIRECTORY
+    skip_next = False
+    for i in range(1, len(sys.argv)):
+        if skip_next: 
+            skip_next = False
+            continue
+        arg = sys.argv[i]
+        arg = re.sub(' +',' ', arg)
+        if arg == "-d":
+            MY_DIRECTORY = sys.argv[i+1]
+            skip_next = True
+            continue
+        if arg == "-v":
+            debug = True
+            continue
+        if command == "":
+            command = arg
+            continue
+        arguments = arguments+" "+arg
+    arguments = arguments.strip()
+    print_debug("Base directory: "+MY_DIRECTORY)
+    print_debug("Command: "+command)
+    print_debug("Arguments: "+arguments)
+    
+# check if the cli requires to be upgraded
+def requires_upgrade():
+    # download the manifest from github which contains the latest version number
+    print_debug("Downloading myhouse-cli manifest from "+MY_MANIFEST_URL)
+    try:
+        response = requests.get(MY_MANIFEST_URL+"?timestamp="+str(int(time.time())))
+        if response.status_code != 200: print_error("Unable to download myhouse-cli manifest")
+        manifest =  yaml.load(response.content, Loader=yaml.SafeLoader)
+    except Exception,e:
+        print_error("Unable to download myhouse-cli manifest: "+str(e))
+    # check if we are at the latest version
+    print_debug("myhouse-cli latest release v"+str(manifest["revision"])+", currently running v"+str(REVISION))
+    if manifest["version"] > VERSION or (manifest["version"] == VERSION and manifest["revision"] > REVISION): return str(manifest["version"])+"-"+str(manifest["revision"])
+    return None
+    
 # load .env file with common docker-compose environment variables
 def load_env():
     global env
@@ -67,50 +110,20 @@ def load_env():
     except Exception,e: 
         print_error("unable to read environment file from "+env_file+": "+str(e))
     print_debug("Loaded "+str(len(env))+" env settings")
-    if "VERSION" not in env:
-        print_error("invalid environment file")
-
-# parse command line arguments
-def parse_command_line():
-    global command, arguments, debug, MY_DIRECTORY
-    skip_next = False
-    for i in range(1, len(sys.argv)):
-        if skip_next: 
-            skip_next = False
-            continue
-        arg = sys.argv[i]
-        arg = re.sub(' +',' ', arg)
-        if arg == "-b":
-            DEFAULT_MYHOUSE_VERSION = sys.argv[i+1]
-            skip_next = True
-            continue
-        if arg == "-d":
-            MY_DIRECTORY = sys.argv[i+1]
-            skip_next = True
-            continue
-        if arg == "-v":
-            debug = True
-            continue
-        if command == "":
-            command = arg
-            continue
-        arguments = arguments+" "+arg
-    arguments = arguments.strip()
-    print_debug("Base directory: "+MY_DIRECTORY)
-    print_debug("Command: "+command)
-    print_debug("Arguments: "+arguments)
 
 # download and return a manifest from a remote git repository
-def get_manifest(package, repo):
-    print_debug("Loading manifest file for package "+package)
+def get_manifest(package, repository, branch):
+    print_debug("Loading manifest file for package "+package+":"+branch)
     try:
-        manifest_url = "https://raw.githubusercontent.com/"+repo+"/"+env["VERSION"]+"/manifest.yml?timestamp="+str(int(time.time()))
+        manifest_url = "https://raw.githubusercontent.com/"+repository+"/"+branch+"/manifest.yml?timestamp="+str(int(time.time()))
         response = requests.get(manifest_url)
-        if response.status_code != 200: print_error("Unable to download manifest of "+repo)
+        if response.status_code != 200: 
+            print_warning("skipping package "+package+":"+branch)
+            return None
         return yaml.load(response.content, Loader=yaml.SafeLoader)
     except Exception,e:
-        print_error("Unable to download manifest of "+repo+": "+str(e))
-    
+        print_warning("skipping package "+package+":"+branch+": "+str(e))
+        return None    
 
 # return an array of registered packages in the marketplace
 def list_marketplace():
@@ -118,7 +131,7 @@ def list_marketplace():
     print_debug("Listing Marketplace items...")
     try:
         # list all files in the marketplace database
-        response = requests.get(MARKETPLACE_URL)
+        response = requests.get(MARKETPLACE_URL+"?ref="+MARKETPLACE_BRANCH)
         if response.status_code != 200: print_error("Unable to list marketplace items")
         content = json.loads(response.content)
         # for each package in the marketplace
@@ -134,7 +147,7 @@ def list_marketplace():
 def get_repository(package):
     try: 
         # download from the marketplace the file for the package
-        response = requests.get("https://raw.githubusercontent.com/myhouse-project/myhouse-marketplace/master/marketplace/"+package+".yml?timestamp="+str(int(time.time())))
+        response = requests.get("https://raw.githubusercontent.com/myhouse-project/myhouse-marketplace/"+MARKETPLACE_BRANCH+"/marketplace/"+package+".yml?timestamp="+str(int(time.time())))
         if response.status_code != 200: print_error("Unable to retrieve github repository for package "+package)
         content = yaml.load(response.content, Loader=yaml.SafeLoader)
         if "github" not in content: return None
@@ -142,33 +155,48 @@ def get_repository(package):
     except Exception,e:
         print_error("Unable to retrieve github repository for package "+package+": "+str(e))
         
+# parse a package splitting the package name from the branch
+def parse_package(string):
+    package = string
+    branch = "master"
+    if ":" in string: package, branch = string.split(":", 1)
+    return package, branch        
     
 # build the marketplace database
-def get_marketplace(packages=None):
+def get_marketplace(requested_packages=None, package_branch="master"):
     global env
     marketplace = {}
     # get the list of all items in the marketplace
-    index = list_marketplace()
+    marketplace_index = list_marketplace()
     try:
         # for each package in the marketplace
-        for i in range(0, len(index)):
-            package = index[i]
-            # if we need to download the entire marketplace, show the user our progresses
-            if packages is None:
-                msg = "Downloading marketplace database: "+str( (i+1)*100/len(index) )+"%"
+        for i in range(0, len(marketplace_index)):
+            marketplace_package = marketplace_index[i]
+            # no specific package requested, tell the user we need to download the entire marketplace
+            if requested_packages is None:
+                msg = "Downloading marketplace database: "+str( (i+1)*100/len(marketplace_index) )+"%"
                 sys.stdout.write('\r')
                 sys.stdout.write(msg)
                 sys.stdout.flush()
-                if i == len(index)-1: sys.stdout.write('\n')
-            # filter out not requested packages
-            if packages is not None and package not in packages: continue
+                if i == len(marketplace_index)-1: sys.stdout.write('\n')
+            # if specific packages are requested, filter out unwanted packages
+            if requested_packages is not None:
+                include_package = False
+                for package in requested_packages:
+                    package_name, package_branch = parse_package(package)
+                    if package_name == marketplace_package: include_package = True
+                if not include_package: continue
             # download the marketplace item which contains the github repo reference
-            repository = get_repository(package)
+            repository = get_repository(marketplace_package)
             if repository is None: continue
             # download the manifest from the remote repository
-            manifest = get_manifest(package, repository)
+            manifest = get_manifest(marketplace_package, repository, package_branch)
+            if manifest is None: continue
+            if manifest["manifest_schema"] != SUPPORTED_MANIFEST_SCHEMA:
+                print_warning("Skipping package "+marketplace_package+" because manifest v"+str(manifest["manifest_schema"])+" is not supported")
+                continue
             # populate the marketplace
-            marketplace[package] = manifest
+            marketplace[marketplace_package] = manifest
         return marketplace
     except Exception,e:
         print_error("Unable to build marketplace index: "+str(e))
@@ -223,66 +251,75 @@ def run_docker_compose(args):
 # run docker
 def run_docker(args):
     subprocess.call(["docker"] + args)
+
+# run git
+def run_git(args):
+    return subprocess.check_output(["git", "-C", MY_DIRECTORY] + args)
     
-# check if the cli requires to be upgraded
-def requires_upgrade():
-    # download the manifest from github which contains the latest version number
-    print_debug("Downloading myhouse-cli manifest from "+MY_MANIFEST_URL)
+# read and return a (local) manifest file
+def read_manifest(manifest_file):
+    if not os.path.isfile(manifest_file):
+        print_error("Unable to find a manifest file in "+MY_DIRECTORY)
     try:
-        response = requests.get(MY_MANIFEST_URL+"?timestamp="+str(int(time.time())))
-        if response.status_code != 200: print_error("Unable to download myhouse-cli manifest")
-        manifest =  yaml.load(response.content, Loader=yaml.SafeLoader)
+        with open(manifest_file) as f: content = f.read()
+        manifest = yaml.load(content, Loader=yaml.SafeLoader)
     except Exception,e:
-        print_error("Unable to download myhouse-cli manifest: "+str(e))
-    # check if we are at the latest version
-    print_debug("myhouse-cli latest release v"+str(manifest["revision"])+", currently running v"+str(REVISION))
-    if manifest["revision"] > REVISION: return manifest["revision"]
-    return None
-       
+        print_error("Invalid manifest file in "+MY_DIRECTORY+": "+str(e))
+    if manifest["manifest_schema"] != SUPPORTED_MANIFEST_SCHEMA:
+        print_error("manifest v"+str(manifest["manifest_schema"])+" is not supported")
+    return manifest
+    
 # print usage
 def print_usage():
     print_output("Usage: myhouse-cli [OPTIONS] COMMAND ARGUMENTS")
-    print_output("  -b\tset myHouse version")
-    print_output("  -d\tset installation directory")
+    print_output("  -d\tset the working directory")
     print_output("  -v\tenable debug mode")
     print_output("")
-    print_output("Commands:")
-    print_output("  info                Print out information on a given package")
-    print_output("  install             Install the provided package(s)")
-    print_output("  list_available      List available packages that can be installed")
-    print_output("  list_installed      List already installed packages")
-    print_output("  logs                Print out log information")
-    print_output("  reload              Reload the configuration")
-    print_output("  search              Search packages matching the provided description")
-    print_output("  start               Start configured services")
-    print_output("  stats               Print out running packages CPU and memory utilization")
-    print_output("  status              Show currently running components")
-    print_output("  stop                Stop running services")
-    print_output("  update              Update the installed package(s)")
-    print_output("  uninstall           Uninstall the provided package(s)")
-    print_output("  upgrade             upgrade myhouse-cli to the latest version")
-    print_output("  version             Print out this script version")
+    print_output("General commands:")
+    print_output("  upgrade                     upgrade myhouse-cli to the latest version")
+    print_output("  version                     Print out this script version")
+    print_output("")
+    print_output("Run commands:")
+    print_output("  info <package>              Print out information on a given package")
+    print_output("  install <package(s)>        Install the provided package(s)")
+    print_output("  list_available [<branch>]   List available packages that can be installed")
+    print_output("  list_installed              List already installed packages")
+    print_output("  logs [-f] [<package(s)>]    Print out log information")
+    print_output("  reload                      Reload the configuration")
+    print_output("  search <string>             Search packages matching the provided description")
+    print_output("  start [<package(s)>]        Start configured services")
+    print_output("  stats                       Print out running packages CPU and memory utilization")
+    print_output("  status                      Show currently running components")
+    print_output("  stop                        Stop running services")
+    print_output("  update [<package(s)>]       Update the installed package(s)")
+    print_output("  uninstall [<package(s)>]    Uninstall the provided package(s)")
+    print_output("")
+    print_output("Build commands:")
+    print_output("  commit '<description>'      Commit changes to the local and remote git repository")
+    print_output("  build <amd64|arm32v6>       Build a docker image and push upstream")
+
         
-## MAIN ##
+## MAIN - RUN ##
 
 # parse provided command line
 parse_command_line()
 # check if running the latest version
-if requires_upgrade() is not None: print_warning("a new version of myhouse-cli is available, run 'myhouse-cli upgrade' to upgrade")
+version = requires_upgrade()
+if version is not None: print_warning("a new version of myhouse-cli is available ("+version+"), run 'myhouse-cli upgrade' to upgrade")
 
 # do what requested by the user
 
 # print out information on a given package
 if command == "info":
-    load_configuration()
     package = arguments
     if package == "": print_error("a package name must be provided")
     marketplace = get_marketplace([package])
-    if package not in marketplace: print_error("package "+package+" not found")
-    manifest = marketplace[package]
+    package_name, package_branch = parse_package(package)
+    if package_name not in marketplace: print_error("package "+package+" not found")
+    manifest = marketplace[package_name]
     print_output("Package: "+manifest["package"])
     print_output("Tags: "+manifest["tags"])
-    print_output("Version: "+str(manifest["version"])+"-"+str(manifest["revision"]))
+    print_output("Version: "+str(manifest["version"])+"-"+str(manifest["revision"])+" ("+str(manifest["branch"])+")")
     print_output("Github: https://github.com/"+manifest["github"])
     print_output("Docker: "+manifest["dockerhub"])
     modules = []
@@ -301,19 +338,20 @@ elif command == "install":
     if len(packages) == 0: print_error("at least a package name must be provided")
     marketplace = get_marketplace(packages)
     for package in packages:
+        package_name, package_branch = parse_package(package)
         # ensure package is not already installed
-        if package in config["services"]:
-            print_output(package+" is already installed")
+        if package_name in config["services"]:
+            print_output(package_name+" is already installed")
             continue
         # ensure package exists in the marketplace
-        if package not in marketplace:
-            print_output(package+" not found in the marketplace, skipping")
+        if package_name not in marketplace:
+            print_output(package_name+" not found in the marketplace, skipping")
             continue
         # add the package to the docker-compose file
         try:
             service = {}
-            manifest =  marketplace[package]
-            print_debug("Installing package "+package)
+            manifest =  marketplace[package_name]
+            print_debug("Installing package "+package_name+":"+package_branch)
             # if runtime parameters are provided, merge them with the service
             if "container_config" in manifest: 
                 print_debug("Container default runtime: "+str(manifest["container_config"]))
@@ -321,7 +359,7 @@ elif command == "install":
             # add env_file
             service["env_file"] = ".env"
             # add image
-            service["image"] = manifest["dockerhub"]+":${ARCHITECTURE}-${VERSION}"
+            service["image"] = manifest["dockerhub"]+":${ARCHITECTURE}-"+package_branch
             # add MYHOUSE_MODULES variable
             if "modules" in manifest:
                 modules = []
@@ -350,19 +388,21 @@ elif command == "install":
                     split = device.split(":")
                     print_output("Please ensure the mapped device "+split[0]+" exists")
             # the docker daemon will restart the service at boot time
+            # TODO: add restart = always
             #service["restart"] = "always"
             # add the new service
-            config["services"][package] = service
+            config["services"][package_name] = service
         except Exception,e:
-            print_error("installation of package "+package+" failed: "+str(e))
-        print_output(package+" installed successfully")
+            print_error("installation of package "+package_name+":"+package_branch+" failed: "+str(e))
+        print_output(package_name+":"+package_branch+" installed successfully")
     # save the updated configuration file
     save_configuration()
     
 # list packages available to install
 elif command == "list_available":
     load_configuration()
-    marketplace = get_marketplace()
+    branch = arguments if arguments != "" else "master"
+    marketplace = get_marketplace(None, branch)
     for package in sorted(marketplace):
         # skip already installed packages
         if package in config["services"]: continue
@@ -376,37 +416,33 @@ elif command == "list_installed":
         
 # run docker logs
 elif command == "logs":
-    load_configuration()
     options = arguments.split(" ") if arguments != "" else []
     run_docker_compose(["logs"]+options)
     
 # reload the configuration
 elif command == "reload":
-    load_configuration()
     run_docker_compose(["up", "-d", "--remove-orphans"])
 
 # search for a package
 elif command == "search":
     load_configuration()
-    marketplace = get_marketplace()
+    branch = arguments if arguments != "" else "master"
+    marketplace = get_marketplace(None, branch)
     for package in sorted(marketplace):
         if arguments in marketplace[package]["description"] or arguments in marketplace[package]["tags"]:
             print_output(package+": "+marketplace[package]["description"])
             
 # start services
 elif command == "start":
-    load_configuration()
     packages = arguments.split(" ") if arguments != "" else []
     run_docker_compose(["up", "-d", "--remove-orphans"]+packages)
     
 # run docker stats
 elif command == "stats":
-    load_configuration()
     run_docker(["stats", "--no-stream"])
 
 # run docker ps
 elif command == "status":
-    load_configuration()
     run_docker_compose(["ps"])
 
 # stop services
@@ -415,7 +451,6 @@ elif command == "stop":
     
 # update an installed packages
 elif command == "update":
-    load_configuration()
     packages = arguments.split(" ") if arguments != "" else []
     run_docker_compose(["pull"]+packages)
     
@@ -425,16 +460,98 @@ elif command == "uninstall":
     packages = arguments.split(" ")
     if len(packages) == 0: print_error("at least a package name must be provided")
     for package in packages:
+        package_name, package_branch = parse_package(package)
         # ensure package is installed
-        if package not in config["services"]:
-            print_output(package+" is not installed")
+        if package_name not in config["services"]:
+            print_output(package_name+" is not installed")
             continue
         # remove the package from the docker-compose file
-        del config["services"][package]
-        print_output(package+" uninstalled successfully")
+        del config["services"][package_name]
+        print_output(package_name+" uninstalled successfully")
     # save the updated configuration file
     save_configuration()
     
+## MAIN - BUILD ##
+
+# commit changes to a git repository and push upstream
+elif command == "commit":
+    if arguments == "": print_error("provide a description for this commit")
+    # read the manifest file
+    manifest_file = MY_DIRECTORY+"/manifest.yml"
+    manifest = read_manifest(manifest_file)
+    # ensure we are in the same branch of the manifest
+    output = run_git(["branch"])
+    branch = None
+    for line in output.split("\n"):
+        if line.startswith("* "): branch = line.replace("* ","")
+    if branch is None: print_error("unable to determine current branch of "+MY_DIRECTORY)
+    if branch != manifest["branch"]: print_error(MY_DIRECTORY+" current branch does not match with the manifest's branch")
+    # increase revision number
+    if "nothing to commit" not in run_git(["status"]):
+        manifest["revision"] = manifest["revision"]+1
+        # convert the manifest back to YAML
+        try:
+            content = yaml.safe_dump(manifest, default_flow_style=False)
+        except Exception,e:
+            print_error("unable to edit the manifest file: "+str(e))
+        # save the updated manifest
+        try:
+            f = open(manifest_file, "w")
+            f.write(content)
+            f.close()
+        except Exception,e:
+            print_error("unable to write the manifest file: "+str(e))
+        print_output("Setting new version for "+manifest["package"]+" to "+str(manifest["version"])+"-"+str(manifest["revision"])+" ("+str(manifest["branch"])+")")
+        # add the new files to git 
+        print_output(run_git(["add", "."]))
+        # print out the status
+        print_output(run_git(["status"]))
+        print_output("\nPublishing changes to the remote repository...")
+        # commit the changes
+        print_output(run_git(["commit", "-m", arguments]))
+        # push the changes to the remote repository
+        print_output(run_git(["push", "origin", manifest["branch"]]))
+    else:
+        print_output("Nothing to commit on "+manifest["package"])
+
+# build a docker image and push upstream
+elif command == "build":    
+    if arguments == "": print_error("provide an architecture or a set of architectures to build against")
+    architectures = arguments.split(",")
+    # read the manifest file
+    manifest = read_manifest(MY_DIRECTORY+"/manifest.yml")
+    # for each architecture
+    for architecture in architectures:
+        if architecture not in ["amd64", "arm32v6"]: print_error("Invalid architecture "+architecture)
+        # build the docker image
+        image = manifest["dockerhub"]+":"+architecture+"-"+manifest["branch"]
+        print_output("\nBuilding docker image "+image+"...")
+        run_docker(["build", "--rm", "--build-arg", "SDK_VERSION=development", "--build-arg", "ARCHITECTURE="+architecture, "--tag", image, MY_DIRECTORY])
+        # push the image to dockerhub
+        print_output("\nPublishing docker image "+image+"...")
+        run_docker(["push", image])
+        
+# build a docker image and push upstream
+elif command == "build_sdk":
+    arguments = arguments.split(" ")
+    if len(arguments) != 2: print_error("provide a SDK image and architecture(s) to build against")
+    sdk_image = arguments[0]
+    architectures = arguments[1].split(",")
+    # read the manifest file
+    manifest = read_manifest(MY_DIRECTORY+"/sdk/manifest.yml")
+    # for each architecture
+    for architecture in architectures:
+        if architecture not in ["amd64", "arm32v6"]: print_error("Invalid architecture "+architecture)
+        # build the docker image
+        image = manifest["dockerhub"]+"-"+sdk_image+":"+architecture+"-"+manifest["branch"]
+        print_output("\nBuilding docker image "+image+"...")
+        run_docker(["build", "--rm", "--file", MY_DIRECTORY+"/Dockerfile-"+sdk_image, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image, MY_DIRECTORY])
+        # push the image to dockerhub
+        print_output("\nPublishing docker image "+image+"...")
+        run_docker(["push", image])
+    
+## MAIN - GENERAL ##
+
 # upgrade myhouse-cli to the latest version
 elif command == "upgrade":
     # upgrade needed
@@ -453,13 +570,13 @@ elif command == "upgrade":
             f.close()
         except Exception,e:
             print_error("Unable to install the latest version: "+str(e))
-        print_output("Upgrade to version "+VERSION+"-"+str(version)+" successful")
+        print_output("Upgrade to version v"+version+" ("+str(BRANCH)+") successful")
     else:
-        print_output("Already at the latest version ("+VERSION+"-"+str(REVISION)+")")
+        print_output("Already at the latest version (v"+str(VERSION)+"-"+str(REVISION)+" ("+str(BRANCH)+")")
 
 # print out this script version
 elif command == "version":
-    print_output("myhouse-cli "+VERSION+"-"+str(REVISION))
-            
+    print_output("myhouse-cli v"+str(VERSION)+"-"+str(REVISION)+" ("+str(BRANCH)+")")
+
 else:
     print_usage()
