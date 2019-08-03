@@ -12,9 +12,10 @@ import requests
 ## constants
 BRANCH = "development"
 VERSION = 1.0
-REVISION = 8
+REVISION = 9
 MARKETPLACE_URL = "https://api.github.com/repos/myhouse-project/myhouse-marketplace/contents/marketplace"
 MARKETPLACE_BRANCH = "master"
+SDK_BRANCH = "development"
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+BRANCH+"/version.yml"
 MY_DOWNLOAD_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+BRANCH+"/myhouse-cli"
 MY_DIRECTORY = os.getcwd()
@@ -276,33 +277,35 @@ def read_manifest(manifest_file):
     
 # print usage
 def print_usage():
+    print_output("myhouse-cli v"+str(VERSION)+"-"+str(REVISION)+" ("+str(BRANCH)+")")
     print_output("Usage: myhouse-cli [OPTIONS] COMMAND ARGUMENTS")
     print_output("  -d\tset the working directory")
     print_output("  -v\tenable debug output")
-    print_output("  -q\tavoid user interaction")
+    print_output("  -q\tquite mode - do not run interactively")
     print_output("")
     print_output("General commands:")
-    print_output("  upgrade                     upgrade myhouse-cli to the latest version")
-    print_output("  version                     Print out this script version")
+    print_output("  upgrade                             Upgrade myhouse-cli to the latest version")
+    print_output("  version                             Print out this script version")
     print_output("")
     print_output("Run commands:")
-    print_output("  info <package>              Print out information on a given package")
-    print_output("  install <package(s)>        Install the provided package(s)")
-    print_output("  list_available [<branch>]   List available packages that can be installed")
-    print_output("  list_installed              List already installed packages")
-    print_output("  logs [-f] [<package(s)>]    Print out log information")
-    print_output("  reload                      Reload the configuration")
-    print_output("  search <string>             Search packages matching the provided description")
-    print_output("  start [<package(s)>]        Start configured services")
-    print_output("  stats                       Print out running packages CPU and memory utilization")
-    print_output("  status                      Show currently running components")
-    print_output("  stop                        Stop running services")
-    print_output("  update [<package(s)>]       Update the installed package(s)")
-    print_output("  uninstall [<package(s)>]    Uninstall the provided package(s)")
+    print_output("  info <package>                      Print out information on a given package")
+    print_output("  install <package(s)>                Install the provided package(s)")
+    print_output("  list_available [<branch>]           List available packages that can be installed")
+    print_output("  list_installed                      List already installed packages")
+    print_output("  logs [-f] [<package(s)>]            Print out log information")
+    print_output("  reload                              Reload the configuration")
+    print_output("  search <string>                     Search packages matching the provided description")
+    print_output("  start [<package(s)>]                Start configured services")
+    print_output("  stats                               Print out running packages CPU and memory utilization")
+    print_output("  status                              Show currently running components")
+    print_output("  stop                                Stop running services")
+    print_output("  update [<package(s)>]               Update the installed package(s)")
+    print_output("  uninstall [<package(s)>]            Uninstall the provided package(s)")
     print_output("")
     print_output("Build commands:")
-    print_output("  commit '<description>'      Commit changes to the local and remote git repository")
-    print_output("  build <amd64|arm32v6>       Build a docker image and push upstream")
+    print_output("  commit '<description>'              Commit changes to the local and remote git repository")
+    print_output("  build <amd64,arm32v6>               Build a docker image and push it upstream")
+    print_output("  build_sdk <image> <amd64,arm32v6>   Build a SDK docker image and push it upstream")
 
         
 ## MAIN - RUN ##
@@ -492,14 +495,14 @@ elif command == "commit":
         if line.startswith("* "): branch = line.replace("* ","")
     if branch is None: print_error("unable to determine current branch of "+MY_DIRECTORY)
     if branch != manifest["branch"]: print_error(MY_DIRECTORY+" current branch does not match with the manifest's branch")
-    # increase revision number
     if "nothing to commit" not in run_git(["status"]):
         # ask the user before proceeding
         if not quite:
-            # add the new files to git 
+            # add the new files to git
             print_output(run_git(["add", "."]))
             print_output(run_git(["status"]))
-            raw_input("Do you want to proceed committing those changes?")
+            raw_input("Do you want to proceed committing these changes?")
+        # increase revision number
         manifest["revision"] = manifest["revision"]+1
         # convert the manifest back to YAML
         try:
@@ -523,6 +526,7 @@ elif command == "commit":
         print_output(run_git(["commit", "-m", arguments]))
         # push the changes to the remote repository
         print_output(run_git(["push", "origin", manifest["branch"]]))
+        # TODO: for master branch, tag with version number
     else:
         print_output("Nothing to commit on "+manifest["package"])
 
@@ -538,10 +542,11 @@ elif command == "build":
         # build the docker image
         image = manifest["dockerhub"]+":"+architecture+"-"+manifest["branch"]
         print_output("\nBuilding docker image "+image+"...")
-        run_docker(["build", "--rm", "--build-arg", "SDK_VERSION=development", "--build-arg", "ARCHITECTURE="+architecture, "--tag", image, MY_DIRECTORY])
+        run_docker(["build", "--rm", "--build-arg", "SDK_VERSION="+SDK_BRANCH, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image, MY_DIRECTORY])
         # push the image to dockerhub
         print_output("\nPublishing docker image "+image+"...")
         run_docker(["push", image])
+        # TODO: for master branch, tag with version number
         
 # build a docker image and push upstream
 elif command == "build_sdk":
