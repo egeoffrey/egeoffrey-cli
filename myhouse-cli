@@ -12,7 +12,7 @@ import requests
 ## constants
 BRANCH = "development"
 VERSION = 1.0
-REVISION = 7
+REVISION = 8
 MARKETPLACE_URL = "https://api.github.com/repos/myhouse-project/myhouse-marketplace/contents/marketplace"
 MARKETPLACE_BRANCH = "master"
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+BRANCH+"/version.yml"
@@ -23,6 +23,8 @@ SUPPORTED_MANIFEST_SCHEMA = 2
 ## variables
 # debug output 
 debug = False
+# do not require user interaction
+quite = False
 # requested command
 command = ""
 # arguments to the requested command
@@ -66,6 +68,9 @@ def parse_command_line():
             continue
         if arg == "-v":
             debug = True
+            continue
+        if arg == "-q":
+            quite = True
             continue
         if command == "":
             command = arg
@@ -273,7 +278,8 @@ def read_manifest(manifest_file):
 def print_usage():
     print_output("Usage: myhouse-cli [OPTIONS] COMMAND ARGUMENTS")
     print_output("  -d\tset the working directory")
-    print_output("  -v\tenable debug mode")
+    print_output("  -v\tenable debug output")
+    print_output("  -q\tavoid user interaction")
     print_output("")
     print_output("General commands:")
     print_output("  upgrade                     upgrade myhouse-cli to the latest version")
@@ -488,6 +494,12 @@ elif command == "commit":
     if branch != manifest["branch"]: print_error(MY_DIRECTORY+" current branch does not match with the manifest's branch")
     # increase revision number
     if "nothing to commit" not in run_git(["status"]):
+        # ask the user before proceeding
+        if not quite:
+            # add the new files to git 
+            print_output(run_git(["add", "."]))
+            print_output(run_git(["status"]))
+            raw_input("Do you want to proceed committing those changes?")
         manifest["revision"] = manifest["revision"]+1
         # convert the manifest back to YAML
         try:
@@ -516,7 +528,7 @@ elif command == "commit":
 
 # build a docker image and push upstream
 elif command == "build":    
-    if arguments == "": print_error("provide an architecture or a set of architectures to build against")
+    if arguments == "": print_error("provide an architecture or a set of architectures to build against (e.g. amd64,arm32v6)")
     architectures = arguments.split(",")
     # read the manifest file
     manifest = read_manifest(MY_DIRECTORY+"/manifest.yml")
