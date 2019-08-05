@@ -12,7 +12,7 @@ import requests
 ## constants
 BRANCH = "development"
 VERSION = 1.0
-REVISION = 9
+REVISION = 10
 MARKETPLACE_URL = "https://api.github.com/repos/myhouse-project/myhouse-marketplace/contents/marketplace"
 MARKETPLACE_BRANCH = "master"
 SDK_BRANCH = "development"
@@ -55,7 +55,7 @@ def print_output(message):
     
 # parse command line arguments
 def parse_command_line():
-    global command, arguments, debug, MY_DIRECTORY
+    global command, arguments, debug, quite, MY_DIRECTORY
     skip_next = False
     for i in range(1, len(sys.argv)):
         if skip_next: 
