@@ -13,11 +13,11 @@ import requests
 BRANCH = "development"
 VERSION = 1.0
 REVISION = 10
-MARKETPLACE_URL = "https://api.github.com/repos/myhouse-project/myhouse-marketplace/contents/marketplace"
+MARKETPLACE_URL = "https://api.github.com/repos/egeoffrey/egeoffrey-marketplace/contents/marketplace"
 MARKETPLACE_BRANCH = "master"
 SDK_BRANCH = "development"
-MY_MANIFEST_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+BRANCH+"/version.yml"
-MY_DOWNLOAD_URL = "https://raw.githubusercontent.com/myhouse-project/myhouse-cli/"+BRANCH+"/myhouse-cli"
+MY_MANIFEST_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/version.yml"
+MY_DOWNLOAD_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/egeoffrey-cli"
 MY_DIRECTORY = os.getcwd()
 SUPPORTED_MANIFEST_SCHEMA = 2
 
@@ -26,6 +26,8 @@ SUPPORTED_MANIFEST_SCHEMA = 2
 debug = False
 # do not require user interaction
 quite = False
+# do not check for updates at startup
+skip_updates = True
 # requested command
 command = ""
 # arguments to the requested command
@@ -73,6 +75,9 @@ def parse_command_line():
         if arg == "-q":
             quite = True
             continue
+        if arg == "-s":
+            skip_updates = True
+            continue
         if command == "":
             command = arg
             continue
@@ -85,15 +90,15 @@ def parse_command_line():
 # check if the cli requires to be upgraded
 def requires_upgrade():
     # download the manifest from github which contains the latest version number
-    print_debug("Downloading myhouse-cli manifest from "+MY_MANIFEST_URL)
+    print_debug("Downloading egeoffrey-cli manifest from "+MY_MANIFEST_URL)
     try:
         response = requests.get(MY_MANIFEST_URL+"?timestamp="+str(int(time.time())))
-        if response.status_code != 200: print_error("Unable to download myhouse-cli manifest")
+        if response.status_code != 200: print_error("Unable to download egeoffrey-cli manifest")
         manifest =  yaml.load(response.content, Loader=yaml.SafeLoader)
     except Exception,e:
-        print_error("Unable to download myhouse-cli manifest: "+str(e))
+        print_error("Unable to download egeoffrey-cli manifest: "+str(e))
     # check if we are at the latest version
-    print_debug("myhouse-cli latest release v"+str(manifest["revision"])+", currently running v"+str(REVISION))
+    print_debug("egeoffrey-cli latest release v"+str(manifest["revision"])+", currently running v"+str(REVISION))
     if manifest["version"] > VERSION or (manifest["version"] == VERSION and manifest["revision"] > REVISION): return str(manifest["version"])+"-"+str(manifest["revision"])
     return None
     
@@ -102,7 +107,7 @@ def load_env():
     global env
     env_file = MY_DIRECTORY+"/.env"
     if not os.path.isfile(env_file):
-        print_error("the configuration file '.env' cannot be found in "+env_file+". Please switch into myHouse installation directory or provide the directory with the -d option")
+        print_error("the configuration file '.env' cannot be found in "+env_file+". Please switch into eGeoffrey installation directory or provide the directory with the -d option")
     try:
         with open(env_file) as f: content = f.read()
         for line in content.split("\n"):
@@ -153,7 +158,7 @@ def list_marketplace():
 def get_repository(package):
     try: 
         # download from the marketplace the file for the package
-        response = requests.get("https://raw.githubusercontent.com/myhouse-project/myhouse-marketplace/"+MARKETPLACE_BRANCH+"/marketplace/"+package+".yml?timestamp="+str(int(time.time())))
+        response = requests.get("https://raw.githubusercontent.com/egeoffrey/egeoffrey-marketplace/"+MARKETPLACE_BRANCH+"/marketplace/"+package+".yml?timestamp="+str(int(time.time())))
         if response.status_code != 200: print_error("Unable to retrieve github repository for package "+package)
         content = yaml.load(response.content, Loader=yaml.SafeLoader)
         if "github" not in content: return None
@@ -219,7 +224,7 @@ def load_configuration():
             "version": "3",
             "services": {},
             "networks": {
-                "myhouse": {
+                "egeoffrey": {
                     "driver": "bridge"
                 }
             }
@@ -230,7 +235,7 @@ def load_configuration():
             with open(docker_compose_file) as f: content = f.read()
             config = yaml.load(content, Loader=yaml.SafeLoader)
         except Exception,e:
-            print_error("Unable to load myHouse docker configuration: "+str(e))
+            print_error("Unable to load eGeoffrey docker configuration: "+str(e))
         
 # save docker-compose configuration
 def save_configuration():
@@ -242,7 +247,7 @@ def save_configuration():
         f.write(yaml.safe_dump(config, default_flow_style=False))
         f.close()
     except Exception,e:
-        print_error("Unable to save myHouse docker configuration: "+str(e))
+        print_error("Unable to save eGeoffrey docker configuration: "+str(e))
        
 # run docker-compose
 def run_docker_compose(args):
@@ -277,14 +282,14 @@ def read_manifest(manifest_file):
     
 # print usage
 def print_usage():
-    print_output("myhouse-cli v"+str(VERSION)+"-"+str(REVISION)+" ("+str(BRANCH)+")")
-    print_output("Usage: myhouse-cli [OPTIONS] COMMAND ARGUMENTS")
+    print_output("egeoffrey-cli v"+str(VERSION)+"-"+str(REVISION)+" ("+str(BRANCH)+")")
+    print_output("Usage: egeoffrey-cli [OPTIONS] COMMAND ARGUMENTS")
     print_output("  -d\tset the working directory")
     print_output("  -v\tenable debug output")
     print_output("  -q\tquite mode - do not run interactively")
     print_output("")
     print_output("General commands:")
-    print_output("  upgrade                             Upgrade myhouse-cli to the latest version")
+    print_output("  upgrade                             Upgrade egeoffrey-cli to the latest version")
     print_output("  version                             Print out this script version")
     print_output("")
     print_output("Run commands:")
@@ -313,8 +318,9 @@ def print_usage():
 # parse provided command line
 parse_command_line()
 # check if running the latest version
-version = requires_upgrade()
-if version is not None: print_warning("a new version of myhouse-cli is available ("+version+"), run 'myhouse-cli upgrade' to upgrade")
+if not skip_updates:
+    version = requires_upgrade()
+    if version is not None: print_warning("a new version of egeoffrey-cli is available ("+version+"), run 'egeoffrey-cli upgrade' to upgrade")
 
 # do what requested by the user
 
@@ -368,8 +374,8 @@ elif command == "install":
             # add env_file
             service["env_file"] = ".env"
             # add image
-            service["image"] = manifest["dockerhub"]+":${ARCHITECTURE}-"+package_branch
-            # add MYHOUSE_MODULES variable
+            service["image"] = manifest["dockerhub"]+":"+package_branch+"-${ARCHITECTURE}"
+            # add EGEOFFREY_MODULES variable
             if "modules" in manifest:
                 modules = []
                 for module_object in manifest["modules"]:
@@ -377,11 +383,11 @@ elif command == "install":
                         modules.append(module)
                 if len(modules) > 0:
                     if "environment" not in service: service["environment"] = []
-                    service["environment"].append("MYHOUSE_MODULES="+", ".join(modules))
+                    service["environment"].append("EGEOFFREY_MODULES="+", ".join(modules))
             # link to the default bridge network if no other instructions are provided
             if "network_mode" not in service and "networks" not in service:
                 service["networks"] = []
-                service["networks"].append("myhouse")
+                service["networks"].append("egeoffrey")
             # if there is a volume mapping, create the local MY_DIRECTORY
             if "volumes" in service:
                 for volume in service["volumes"]:
@@ -540,7 +546,7 @@ elif command == "build":
     for architecture in architectures:
         if architecture not in ["amd64", "arm32v6"]: print_error("Invalid architecture "+architecture)
         # build the docker image
-        image = manifest["dockerhub"]+":"+architecture+"-"+manifest["branch"]
+        image = manifest["dockerhub"]+":"+manifest["branch"]+"-"+architecture
         print_output("\nBuilding docker image "+image+"...")
         run_docker(["build", "--rm", "--build-arg", "SDK_VERSION="+SDK_BRANCH, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image, MY_DIRECTORY])
         # push the image to dockerhub
@@ -560,7 +566,7 @@ elif command == "build_sdk":
     for architecture in architectures:
         if architecture not in ["amd64", "arm32v6"]: print_error("Invalid architecture "+architecture)
         # build the docker image
-        image = manifest["dockerhub"]+"-"+sdk_image+":"+architecture+"-"+manifest["branch"]
+        image = manifest["dockerhub"]+"-"+sdk_image+":"+manifest["branch"]+"-"+architecture
         print_output("\nBuilding docker image "+image+"...")
         run_docker(["build", "--rm", "--file", MY_DIRECTORY+"/Dockerfile-"+sdk_image, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image, MY_DIRECTORY])
         # push the image to dockerhub
@@ -569,7 +575,7 @@ elif command == "build_sdk":
     
 ## MAIN - GENERAL ##
 
-# upgrade myhouse-cli to the latest version
+# upgrade egeoffrey-cli to the latest version
 elif command == "upgrade":
     # upgrade needed
     version = requires_upgrade()
@@ -577,23 +583,23 @@ elif command == "upgrade":
         # download the latest version
         try:
             response = requests.get(MY_DOWNLOAD_URL+"?timestamp="+str(int(time.time())))
-            if response.status_code != 200: print_error("Unable to download the newest version of myhouse-cli")
+            if response.status_code != 200: print_error("Unable to download the newest version of egeoffrey-cli")
         except Exception,e:
-            print_error("Unable to download the newest version of myhouse-cli: "+str(e))
+            print_error("Unable to download the newest version of egeoffrey-cli: "+str(e))
         # replace this file
         try:
-            f = open("/usr/local/bin/myhouse-cli", "w")
+            f = open("/usr/local/bin/egeoffrey-cli", "w")
             f.write(response.content)
             f.close()
         except Exception,e:
             print_error("Unable to install the latest version: "+str(e))
         print_output("Upgrade to version v"+version+" ("+str(BRANCH)+") successful")
     else:
-        print_output("Already at the latest version (v"+str(VERSION)+"-"+str(REVISION)+" ("+str(BRANCH)+")")
+        print_output("Already at the latest version - v"+str(VERSION)+"-"+str(REVISION)+" ("+str(BRANCH)+")")
 
 # print out this script version
 elif command == "version":
-    print_output("myhouse-cli v"+str(VERSION)+"-"+str(REVISION)+" ("+str(BRANCH)+")")
+    print_output("egeoffrey-cli v"+str(VERSION)+"-"+str(REVISION)+" ("+str(BRANCH)+")")
 
 else:
     print_usage()
