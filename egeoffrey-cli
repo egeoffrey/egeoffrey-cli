@@ -12,13 +12,14 @@ import requests
 ## constants
 BRANCH = "development"
 VERSION = 1.0
-REVISION = 10
+REVISION = 11
 MARKETPLACE_URL = "https://api.github.com/repos/egeoffrey/egeoffrey-marketplace/contents/marketplace"
 MARKETPLACE_BRANCH = "master"
 SDK_BRANCH = "development"
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/version.yml"
 MY_DOWNLOAD_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/egeoffrey-cli"
 MY_DIRECTORY = os.getcwd()
+DOCKER_COMPOSE = "docker-compose.yml"
 SUPPORTED_MANIFEST_SCHEMA = 2
 
 ## variables
@@ -26,6 +27,8 @@ SUPPORTED_MANIFEST_SCHEMA = 2
 debug = False
 # do not require user interaction
 quite = False
+# do not push anything out
+offline = False
 # do not check for updates at startup
 skip_updates = True
 # requested command
@@ -57,7 +60,7 @@ def print_output(message):
     
 # parse command line arguments
 def parse_command_line():
-    global command, arguments, debug, quite, MY_DIRECTORY
+    global command, arguments, debug, quite, offline, MY_DIRECTORY, DOCKER_COMPOSE
     skip_next = False
     for i in range(1, len(sys.argv)):
         if skip_next: 
@@ -69,8 +72,15 @@ def parse_command_line():
             MY_DIRECTORY = sys.argv[i+1]
             skip_next = True
             continue
+        if arg == "-f":
+            DOCKER_COMPOSE = sys.argv[i+1]
+            skip_next = True
+            continue
         if arg == "-v":
             debug = True
+            continue
+        if arg == "-o":
+            offline = True
             continue
         if arg == "-q":
             quite = True
@@ -215,10 +225,10 @@ def get_marketplace(requested_packages=None, package_branch="master"):
 # load docker-compose configuration
 def load_configuration():
     global config
-    docker_compose_file = MY_DIRECTORY+"/docker-compose.yml"
+    docker_compose_file = MY_DIRECTORY+"/"+DOCKER_COMPOSE
     # load docker-compose common variables
     load_env()
-    # if docker-compose.yml does not exist, make an empty version
+    # if docker-compose file does not exist, make an empty version
     if not os.path.isfile(docker_compose_file): 
         config = {
             "version": "3",
@@ -240,7 +250,7 @@ def load_configuration():
 # save docker-compose configuration
 def save_configuration():
     global config
-    docker_compose_file = MY_DIRECTORY+"/docker-compose.yml"
+    docker_compose_file = MY_DIRECTORY+"/"+DOCKER_COMPOSE
     print_debug("Saving docker-compose configuration to "+docker_compose_file)
     try: 
         f = open(docker_compose_file, "w")
@@ -254,7 +264,7 @@ def run_docker_compose(args):
     current_dir = os.getcwd()
     # when docker-compose runs in a container cannot mount the target directory, let's chdir into it first
     os.chdir(MY_DIRECTORY)
-    docker_compose_file = MY_DIRECTORY+"/docker-compose.yml"
+    docker_compose_file = MY_DIRECTORY+"/"+DOCKER_COMPOSE
     subprocess.call(["docker-compose", "-f", docker_compose_file] + args)
     # get back to the original directory
     os.chdir(current_dir)
@@ -284,9 +294,13 @@ def read_manifest(manifest_file):
 def print_usage():
     print_output("egeoffrey-cli v"+str(VERSION)+"-"+str(REVISION)+" ("+str(BRANCH)+")")
     print_output("Usage: egeoffrey-cli [OPTIONS] COMMAND ARGUMENTS")
-    print_output("  -d\tset the working directory")
-    print_output("  -v\tenable debug output")
-    print_output("  -q\tquite mode - do not run interactively")
+    print_output("")
+    print_output("Options:")
+    print_output("  -d <directory>                      set the working directory")
+    print_output("  -f <filename>                       set custom docker-compose.yml filename")
+    print_output("  -v                                  enable debug output")
+    print_output("  -q                                  quite mode - do not run interactively")
+    print_output("  -o                                  offline mode")
     print_output("")
     print_output("General commands:")
     print_output("  upgrade                             Upgrade egeoffrey-cli to the latest version")
@@ -374,7 +388,7 @@ elif command == "install":
             # add env_file
             service["env_file"] = ".env"
             # add image
-            service["image"] = manifest["dockerhub"]+":"+package_branch+"-${ARCHITECTURE}"
+            service["image"] = manifest["dockerhub"]+":"+package_branch+"-"+env["ARCHITECTURE"]
             # add EGEOFFREY_MODULES variable
             if "modules" in manifest:
                 modules = []
@@ -530,9 +544,10 @@ elif command == "commit":
         print_output("\nPublishing changes to the remote repository...")
         # commit the changes
         print_output(run_git(["commit", "-m", arguments]))
-        # push the changes to the remote repository
-        print_output(run_git(["push", "origin", manifest["branch"]]))
-        # TODO: for master branch, tag with version number
+        if not offline:
+            # push the changes to the remote repository
+            print_output(run_git(["push", "origin", manifest["branch"]]))
+            # TODO: for master branch, tag with version number
     else:
         print_output("Nothing to commit on "+manifest["package"])
 
@@ -549,10 +564,11 @@ elif command == "build":
         image = manifest["dockerhub"]+":"+manifest["branch"]+"-"+architecture
         print_output("\nBuilding docker image "+image+"...")
         run_docker(["build", "--rm", "--build-arg", "SDK_VERSION="+SDK_BRANCH, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image, MY_DIRECTORY])
-        # push the image to dockerhub
-        print_output("\nPublishing docker image "+image+"...")
-        run_docker(["push", image])
-        # TODO: for master branch, tag with version number
+        if not offline:
+            # push the image to dockerhub
+            print_output("\nPublishing docker image "+image+"...")
+            run_docker(["push", image])
+            # TODO: for master branch, tag with version number
         
 # build a docker image and push upstream
 elif command == "build_sdk":
