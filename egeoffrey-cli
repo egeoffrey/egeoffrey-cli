@@ -12,7 +12,7 @@ import requests
 ## constants
 BRANCH = "development"
 VERSION = 1.0
-REVISION = 12
+REVISION = 13
 MARKETPLACE_URL = "https://api.github.com/repos/egeoffrey/egeoffrey-marketplace/contents/marketplace"
 MARKETPLACE_BRANCH = "master"
 SDK_BRANCH = "development"
@@ -29,8 +29,6 @@ debug = False
 quite = False
 # do not push anything out
 offline = False
-# do not check for updates at startup
-skip_updates = True
 # requested command
 command = ""
 # arguments to the requested command
@@ -84,9 +82,6 @@ def parse_command_line():
             continue
         if arg == "-q":
             quite = True
-            continue
-        if arg == "-s":
-            skip_updates = True
             continue
         if command == "":
             command = arg
@@ -332,7 +327,7 @@ def print_usage():
 # parse provided command line
 parse_command_line()
 # check if running the latest version
-if not skip_updates:
+if not offline:
     version = requires_upgrade()
     if version is not None: print_warning("a new version of egeoffrey-cli is available ("+version+"), run 'egeoffrey-cli upgrade' to upgrade")
 
@@ -585,10 +580,9 @@ elif command == "build_sdk":
         image = manifest["dockerhub"]+"-"+sdk_image+":"+manifest["branch"]+"-"+architecture
         print_output("\nBuilding docker image "+image+"...")
         run_docker(["build", "--rm", "--file", MY_DIRECTORY+"/Dockerfile-"+sdk_image, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image, MY_DIRECTORY])
-        if not offline:
-            # push the image to dockerhub
-            print_output("\nPublishing docker image "+image+"...")
-            run_docker(["push", image])
+        # push the image to dockerhub
+        print_output("\nPublishing docker image "+image+"...")
+        run_docker(["push", image])
     
 ## MAIN - GENERAL ##
 
