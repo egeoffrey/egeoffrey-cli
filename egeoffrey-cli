@@ -12,7 +12,7 @@ import requests
 ## constants
 BRANCH = "development"
 VERSION = 1.0
-REVISION = 13
+REVISION = 14
 MARKETPLACE_URL = "https://api.github.com/repos/egeoffrey/egeoffrey-marketplace/contents/marketplace"
 MARKETPLACE_BRANCH = "master"
 SDK_BRANCH = "development"
@@ -580,9 +580,10 @@ elif command == "build_sdk":
         image = manifest["dockerhub"]+"-"+sdk_image+":"+manifest["branch"]+"-"+architecture
         print_output("\nBuilding docker image "+image+"...")
         run_docker(["build", "--rm", "--file", MY_DIRECTORY+"/Dockerfile-"+sdk_image, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image, MY_DIRECTORY])
-        # push the image to dockerhub
-        print_output("\nPublishing docker image "+image+"...")
-        run_docker(["push", image])
+        if not offline:
+            # push the image to dockerhub
+            print_output("\nPublishing docker image "+image+"...")
+            run_docker(["push", image])
     
 ## MAIN - GENERAL ##
 
