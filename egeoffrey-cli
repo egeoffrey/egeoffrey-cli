@@ -12,7 +12,7 @@ import requests
 ## constants
 BRANCH = "development"
 VERSION = 1.0
-REVISION = 15
+REVISION = 16
 MARKETPLACE_URL = "https://api.github.com/repos/egeoffrey/egeoffrey-marketplace/contents/marketplace"
 MARKETPLACE_BRANCH = "master"
 SDK_BRANCH = "development"
@@ -308,7 +308,7 @@ def print_usage():
     print_output("  list_installed                      List already installed packages")
     print_output("  logs [-f] [<package(s)>]            Print out log information")
     print_output("  reload                              Reload the configuration")
-    print_output("  search <string>                     Search packages matching the provided description")
+    print_output("  search <string> [branch]            Search packages matching the provided description")
     print_output("  start [<package(s)>]                Start configured services")
     print_output("  stats                               Print out running packages CPU and memory utilization")
     print_output("  status                              Show currently running components")
@@ -449,11 +449,15 @@ elif command == "reload":
 
 # search for a package
 elif command == "search":
+    search = arguments.split(" ")
+    if len(search) == 0 or len(search) > 2: print_error("invalid search string provided")
+    branch = "master"
+    if len(search) == 2: branch = search[1]
     load_configuration()
-    branch = arguments if arguments != "" else "master"
     marketplace = get_marketplace(None, branch)
+    words = search[0].split(" ")
     for package in sorted(marketplace):
-        if arguments in marketplace[package]["description"] or arguments in marketplace[package]["tags"]:
+        if len(list(set(words) & set(marketplace[package]["description"].split(" ")))) > 0 or len(list(set(words) & set(marketplace[package]["tags"].split(" ")))) > 0:
             print_output(package+": "+marketplace[package]["description"])
             
 # start services
