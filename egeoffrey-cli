@@ -13,7 +13,7 @@ import filecmp
 ## constants
 BRANCH = "development"
 VERSION = 1.0
-REVISION = 17
+REVISION = 18
 MARKETPLACE_URL = "https://api.github.com/repos/egeoffrey/egeoffrey-marketplace/contents/marketplace"
 MARKETPLACE_BRANCH = "master"
 SDK_BRANCH = "development"
@@ -712,10 +712,15 @@ elif command == "make_distro":
                     if apk_package not in dockerfile_distro["apk"]:
                         dockerfile_distro["apk"].append(apk_package)
             elif line.startswith("RUN pip "):
-                pip_packages = line.replace("RUN pip install ", "").replace("pip install --upgrade setuptools && ", "").split(" ")
-                for pip_package in pip_packages:
-                    if pip_package not in dockerfile_distro["pip"]:
-                        dockerfile_distro["pip"].append(pip_package)
+                if line == "RUN pip install --upgrade setuptools": continue
+                # if there are package-specific install options, isolate the command
+                if "--install-option" in line:
+                    dockerfile_distro["others"].append(line)
+                else:
+                    pip_packages = line.replace("RUN pip install ", "").split(" ")
+                    for pip_package in pip_packages:
+                        if pip_package not in dockerfile_distro["pip"]:
+                            dockerfile_distro["pip"].append(pip_package)
             elif line.startswith("COPY "):
                 if line not in dockerfile_distro["copy"]:
                     dockerfile_distro["copy"].append(line)
