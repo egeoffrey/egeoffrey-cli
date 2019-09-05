@@ -8,11 +8,12 @@ import json
 import yaml
 import subprocess
 import requests
+import filecmp
 
 ## constants
 BRANCH = "development"
 VERSION = 1.0
-REVISION = 16
+REVISION = 17
 MARKETPLACE_URL = "https://api.github.com/repos/egeoffrey/egeoffrey-marketplace/contents/marketplace"
 MARKETPLACE_BRANCH = "master"
 SDK_BRANCH = "development"
@@ -67,7 +68,7 @@ def parse_command_line():
         arg = sys.argv[i]
         arg = re.sub(' +',' ', arg)
         if arg == "-d":
-            MY_DIRECTORY = sys.argv[i+1]
+            MY_DIRECTORY = sys.argv[i+1].rstrip("/")
             skip_next = True
             continue
         if arg == "-f":
@@ -254,6 +255,10 @@ def save_configuration():
     except Exception,e:
         print_error("Unable to save eGeoffrey docker configuration: "+str(e))
        
+# run a command    
+def run(command):
+    return subprocess.Popen(command, shell=True, stdout=subprocess.PIPE,  stderr=subprocess.PIPE).stdout.read()
+
 # run docker-compose
 def run_docker_compose(args):
     current_dir = os.getcwd()
@@ -320,6 +325,7 @@ def print_usage():
     print_output("  commit '<description>'              Commit changes to the local and remote git repository")
     print_output("  build <amd64,arm>                   Build a docker image and push it upstream")
     print_output("  build_sdk <image> <amd64,arm>       Build a SDK docker image and push it upstream")
+    print_output("  make_distro                         Create a distro including the configured packages")
 
         
 ## MAIN - RUN ##
@@ -590,6 +596,264 @@ elif command == "build_sdk":
             # push the image to dockerhub
             print_output("\nPublishing docker image "+image+"...")
             run_docker(["push", image])
+    
+# make a distro using the files provided in the distro directory
+elif command == "make_distro":
+    # variables
+    distro_dir = MY_DIRECTORY+"/distro"
+    if not os.path.isdir(distro_dir):
+        print_error("Distribution configuration directory not found at "+distro_dir)
+    build_dir = distro_dir+"/.build"
+    tmp_dir = distro_dir+"/.tmp"
+    dockerfile_distro = {}
+    dockerfile_distro["arg"] = []
+    dockerfile_distro["from"] = None
+    dockerfile_distro["apt-get"] = []
+    dockerfile_distro["apk"] = []
+    dockerfile_distro["pip"] = []
+    dockerfile_distro["others"] = []
+    dockerfile_distro["copy"] = []
+    gitignore_distro = []
+    dockerignore_distro = []
+    # clean up
+    run("rm -rf "+build_dir)
+    run("rm -rf "+tmp_dir)
+    run("mkdir -p "+build_dir)
+    run("mkdir -p "+build_dir+"/manifests")
+    run("mkdir -p "+tmp_dir)
+    # read - if exists - the existing manifest
+    old_manifest = None
+    if os.path.exists(MY_DIRECTORY+"/manifest.yml"):
+        try:
+            with open(MY_DIRECTORY+"/manifest.yml") as f: content = f.read()
+            old_manifest = yaml.load(content, Loader=yaml.SafeLoader)
+        except Exception,e:
+            print_error("Unable to read manifest file: "+str(e))
+    # read the distro manifest file
+    try:
+        with open(distro_dir+"/manifest.yml") as f: content = f.read()
+        manifest_distro = yaml.load(content, Loader=yaml.SafeLoader)
+    except Exception,e:
+        print_error("Unable to read distro manifest: "+str(e))
+    # parse the provided list of packages to add
+    packages = []
+    try:
+        with open(distro_dir+"/packages.txt") as f: content = f.read()
+        for line in content.split("\n"):
+            # clean up the file
+            line = line.replace(" ", "")
+            if line.startswith("#"): continue
+            if line == "": continue
+            packages.append(line)
+    except Exception,e: 
+        print_error("unable to open repo list: "+str(e))
+    print_output("Building distro "+manifest_distro["package"]+" with "+str(len(packages))+" packages")
+    # for each package
+    for package in packages:
+        # get package name from the repo URL
+        repo, branch = package.split(":")
+        user , package_name = repo.split("/")
+        print_output("Adding package "+package_name+"...")
+        # download the package
+        package_tar_file = tmp_dir+"/"+package_name+".tar.gz"
+        package_tmp_dir = tmp_dir+"/"+package_name
+        package_url = "https://github.com/"+repo+"/archive/"+branch+".tar.gz"
+        print_debug("Downloading "+package_url+"...")
+        run("wget "+package_url+" -O "+package_tar_file)
+        # extract the package's content
+        print_debug("Extracting "+package_tar_file+"...")
+        run("mkdir "+package_tmp_dir)
+        run("tar zxfv "+package_tar_file+" --strip-components=1 -C "+package_tmp_dir)
+        # read the package's manifest
+        manifest_file = package_tmp_dir+"/manifest.yml"
+        try:
+            with open(manifest_file) as f: content = f.read()
+            manifest = yaml.load(content, Loader=yaml.SafeLoader)
+        except Exception,e:
+            print_error("Unable to load manifest of "+package_name+": "+str(e))
+        run("cp -f "+manifest_file+" "+build_dir+"/manifests/manifest_"+manifest["package"]+".yml")
+        # update the distro manifest file by merging the package's modules
+        for module_object in manifest["modules"]:
+            manifest_distro["modules"].append(module_object)
+        # update the distro manifest file by merging container_config
+        if "container_config" in manifest:
+            if "container_config" not in manifest_distro:
+                manifest_distro["container_config"] = {}
+            manifest_distro["container_config"].update(manifest["container_config"])
+        # read the package's Dockerfile
+        dockerfile = package_tmp_dir+"/Dockerfile"
+        try:
+            with open(dockerfile) as f: content = f.read()
+        except Exception,e:
+            print_error("Unable to load Dockerfile of "+package_name+": "+str(e))
+        content = content.replace("\r\n", "\n").replace("\\\n", " ")
+        # parse the Dockerfile
+        for line in content.split("\n"):
+            if line == "" or line[0] == "#": continue
+            # if the same line skip it
+            if line in dockerfile_distro: continue
+            elif line.startswith("ARG "):
+                if line not in dockerfile_distro["arg"]:
+                 dockerfile_distro["arg"].append(line)
+            elif line.startswith("FROM "):
+                if dockerfile_distro["from"] is None:
+                    dockerfile_distro["from"] = line
+                else:
+                    if line != dockerfile_distro["from"]:
+                        print_error(package_name+" is belonging to a different base image than the others")
+            elif line.startswith("RUN apt-get "):
+                apt_get_packages = line.replace("RUN apt-get update && apt-get install -y ", "").replace(" && apt-get clean && rm -rf /var/lib/apt/lists/*", "").split(" ")
+                for apt_get_package in apt_get_packages:
+                    if apt_get_package not in dockerfile_distro["apt-get"]:
+                        dockerfile_distro["apt-get"].append(apt_get_package)
+            elif line.startswith("RUN apk "):
+                apk_packages = line.replace("RUN apk update && apk add ", "").replace(" && rm -rf /var/cache/apk/*", "").split(" ")
+                for apk_package in apk_packages:
+                    if apk_package not in dockerfile_distro["apk"]:
+                        dockerfile_distro["apk"].append(apk_package)
+            elif line.startswith("RUN pip "):
+                pip_packages = line.replace("RUN pip install ", "").replace("pip install --upgrade setuptools && ", "").split(" ")
+                for pip_package in pip_packages:
+                    if pip_package not in dockerfile_distro["pip"]:
+                        dockerfile_distro["pip"].append(pip_package)
+            elif line.startswith("COPY "):
+                if line not in dockerfile_distro["copy"]:
+                    dockerfile_distro["copy"].append(line)
+            else:
+                dockerfile_distro["others"].append(line)
+        # read .gitignore file
+        gitignore_file = package_tmp_dir+"/.gitignore"
+        if os.path.exists(gitignore_file): 
+            try:
+                with open(gitignore_file) as f: content = f.read()
+            except Exception,e:
+                print_error("Unable to load .gitignore of "+package_name+": "+str(e))
+            content = content.replace("\r\n", "\n")
+            # parse the file
+            for line in content.split("\n"):
+                if line == "" or line[0] == "#": continue
+                # if the same line skip it
+                if line in gitignore_distro: continue
+                gitignore_distro.append(line)
+        # read .dockerignore file
+        dockerignore_file = package_tmp_dir+"/.dockerignore"
+        if os.path.exists(dockerignore_file): 
+            try:
+                with open(dockerignore_file) as f: content = f.read()
+            except Exception,e:
+                print_error("Unable to load .dockerignore of "+package_name+": "+str(e))
+            content = content.replace("\r\n", "\n")
+            # parse the file
+            for line in content.split("\n"):
+                if line == "" or line[0] == "#": continue
+                # if the same line skip it
+                if line in dockerignore_distro: continue
+                dockerignore_distro.append(line)
+        # move all the files of the downloaded packages in the build directory
+        for (current_path, dirnames, filenames) in os.walk(package_tmp_dir): 
+            for filename in filenames:
+                package_tmp_file = current_path+os.sep+filename
+                build_file = package_tmp_file.replace(package_tmp_dir, build_dir, 1)
+                build_parent_dir = build_file.replace(filename, "", 1)
+                if not os.path.exists(build_parent_dir): 
+                    os.makedirs(build_parent_dir)
+                run("mv -f "+package_tmp_file+" "+build_file)
+    # build and save the distro Dockerfile
+    try: 
+        f = open(build_dir+"/Dockerfile", "w")
+        for arg in dockerfile_distro["arg"]:
+            f.write(arg+"\n")
+        f.write(dockerfile_distro["from"]+"\n")
+        if len(dockerfile_distro["apt-get"]) > 0:
+            f.write("RUN apt-get update && apt-get install -y "+" ".join(dockerfile_distro["apt-get"])+" && apt-get clean && rm -rf /var/lib/apt/lists/*\n")
+        if len(dockerfile_distro["apk"]) > 0:
+            f.write("RUN apk update && apk add "+" ".join(dockerfile_distro["apk"])+" && rm -rf /var/cache/apk/*\n")
+        if len(dockerfile_distro["pip"]) > 0:
+            f.write("RUN pip install --upgrade setuptools && pip install "+" ".join(dockerfile_distro["pip"])+"\n")
+        for line in dockerfile_distro["others"]:
+            f.write(line+"\n")
+        for line in dockerfile_distro["copy"]:
+            f.write(line+"\n")
+        f.close()
+    except Exception,e:
+        print_error("Unable to save distro Dockerfile: "+str(e))
+    # build and save .gitignore
+    if len(gitignore_distro) > 0:
+        try: 
+            f = open(build_dir+"/.gitignore", "w")
+            for line in gitignore_distro:
+                f.write(line+"\n")
+            f.write(tmp_dir.replace(MY_DIRECTORY+"/", "", 1)+"\n")
+            f.write(build_dir.replace(MY_DIRECTORY+"/", "", 1)+"\n")
+            f.close()
+        except Exception,e:
+            print_error("Unable to save distro .gitignore: "+str(e))
+    # build and save .dockerignore
+    if len(dockerignore_distro) > 0:
+        try: 
+            f = open(build_dir+"/.dockerignore", "w")
+            for line in dockerignore_distro:
+                f.write(line+"\n")
+            f.write(tmp_dir.replace(MY_DIRECTORY+"/", "", 1)+"\n")
+            f.write(build_dir.replace(MY_DIRECTORY+"/", "", 1)+"\n")
+            f.write(tmp_dir.replace(MY_DIRECTORY+"/", "", 1)+"/\n")
+            f.write(build_dir.replace(MY_DIRECTORY+"/", "", 1)+"/\n")
+            f.close()
+        except Exception,e:
+            print_error("Unable to save distro .gitignore: "+str(e))
+    # keep track of the old revision number in the manifest file
+    if old_manifest is not None:
+        manifest_distro["revision"] = old_manifest["revision"]
+    # build and save the distro manifest file
+    try: 
+        f = open(build_dir+"/manifest.yml", "w")
+        f.write(yaml.safe_dump(manifest_distro, default_flow_style=False))
+        f.close()
+    except Exception,e:
+        print_error("Unable to save distro manifest file: "+str(e))
+    # for each file of the build directory check if needs to be moved into the main directory
+    created = 0
+    updated = 0
+    deleted = 0
+    for (current_path, dirnames, filenames) in os.walk(build_dir): 
+        for filename in filenames:
+            build_file = current_path+os.sep+filename
+            target_file = build_file.replace(build_dir, MY_DIRECTORY, 1)
+            target_dir = target_file.replace(filename, "", 1)
+            # if this is a new or updated file, overwrite it
+            if not os.path.exists(target_file):
+                print_debug("Creating "+target_file)
+                if not os.path.exists(target_dir): 
+                    os.makedirs(target_dir)
+                run("cp -f "+build_file+" "+target_file)            
+                created = created+1
+            elif not filecmp.cmp(build_file, target_file):
+                print_debug("Updating "+target_file)
+                if not os.path.exists(target_dir): 
+                    os.makedirs(target_dir)
+                run("cp -f "+build_file+" "+target_file)            
+                updated = updated+1
+    # for each file of the main directory check if exists in the build directory, otherwise, delete it
+    for (current_path, dirnames, filenames) in os.walk(MY_DIRECTORY): 
+        for filename in filenames:
+            if current_path.startswith(distro_dir) or current_path.startswith(MY_DIRECTORY+"/.git"): continue
+            target_file = current_path+os.sep+filename
+            build_file = target_file.replace(MY_DIRECTORY, build_dir, 1)
+            # if the file does not exist anymore, delete it
+            if not os.path.exists(build_file):
+                print_debug("Deleting "+target_file)
+                deleted = deleted+1
+                if os.path.isdir(target_file):
+                    run("rm -rf "+target_file)
+                else:
+                    run("rm -f "+target_file)
+                    # if there are no more files in the directory, delete it
+                    if len([name for name in os.listdir(current_path) if os.path.isfile(os.path.join(current_path, name))]) == 0:
+                        run("rmdir "+current_path)
+    print_output("Done. "+str(created)+" files created, "+str(updated)+" files updated, "+str(deleted)+" files deleted")
+    # clean up
+    run("rm -rf "+tmp_dir)
+    run("rm -rf "+build_dir)
     
 ## MAIN - GENERAL ##
 
