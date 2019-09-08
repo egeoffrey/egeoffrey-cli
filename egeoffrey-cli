@@ -13,7 +13,7 @@ import filecmp
 ## constants
 BRANCH = "development"
 VERSION = 1.0
-REVISION = 18
+REVISION = 19
 MARKETPLACE_URL = "https://api.github.com/repos/egeoffrey/egeoffrey-marketplace/contents/marketplace"
 MARKETPLACE_BRANCH = "master"
 SDK_BRANCH = "development"
@@ -325,7 +325,7 @@ def print_usage():
     print_output("  commit '<description>'              Commit changes to the local and remote git repository")
     print_output("  build <amd64,arm>                   Build a docker image and push it upstream")
     print_output("  build_sdk <image> <amd64,arm>       Build a SDK docker image and push it upstream")
-    print_output("  make_distro                         Create a distro including the configured packages")
+    print_output("  make_collection                     Create a collection including the configured packages")
 
         
 ## MAIN - RUN ##
@@ -597,24 +597,24 @@ elif command == "build_sdk":
             print_output("\nPublishing docker image "+image+"...")
             run_docker(["push", image])
     
-# make a distro using the files provided in the distro directory
-elif command == "make_distro":
+# make a collection using the files provided in the collection directory
+elif command == "make_collection":
     # variables
-    distro_dir = MY_DIRECTORY+"/distro"
-    if not os.path.isdir(distro_dir):
-        print_error("Distribution configuration directory not found at "+distro_dir)
-    build_dir = distro_dir+"/.build"
-    tmp_dir = distro_dir+"/.tmp"
-    dockerfile_distro = {}
-    dockerfile_distro["arg"] = []
-    dockerfile_distro["from"] = None
-    dockerfile_distro["apt-get"] = []
-    dockerfile_distro["apk"] = []
-    dockerfile_distro["pip"] = []
-    dockerfile_distro["others"] = []
-    dockerfile_distro["copy"] = []
-    gitignore_distro = []
-    dockerignore_distro = []
+    collection_dir = MY_DIRECTORY+"/collection"
+    if not os.path.isdir(collection_dir):
+        print_error("Collection configuration directory not found at "+collection_dir)
+    build_dir = collection_dir+"/.build"
+    tmp_dir = collection_dir+"/.tmp"
+    dockerfile_collection = {}
+    dockerfile_collection["arg"] = []
+    dockerfile_collection["from"] = None
+    dockerfile_collection["apt-get"] = []
+    dockerfile_collection["apk"] = []
+    dockerfile_collection["pip"] = []
+    dockerfile_collection["others"] = []
+    dockerfile_collection["copy"] = []
+    gitignore_collection = []
+    dockerignore_collection = []
     # clean up
     run("rm -rf "+build_dir)
     run("rm -rf "+tmp_dir)
@@ -629,16 +629,16 @@ elif command == "make_distro":
             old_manifest = yaml.load(content, Loader=yaml.SafeLoader)
         except Exception,e:
             print_error("Unable to read manifest file: "+str(e))
-    # read the distro manifest file
+    # read the collection manifest file
     try:
-        with open(distro_dir+"/manifest.yml") as f: content = f.read()
-        manifest_distro = yaml.load(content, Loader=yaml.SafeLoader)
+        with open(collection_dir+"/manifest.yml") as f: content = f.read()
+        manifest_collection = yaml.load(content, Loader=yaml.SafeLoader)
     except Exception,e:
-        print_error("Unable to read distro manifest: "+str(e))
+        print_error("Unable to read collection manifest: "+str(e))
     # parse the provided list of packages to add
     packages = []
     try:
-        with open(distro_dir+"/packages.txt") as f: content = f.read()
+        with open(collection_dir+"/packages.txt") as f: content = f.read()
         for line in content.split("\n"):
             # clean up the file
             line = line.replace(" ", "")
@@ -647,7 +647,7 @@ elif command == "make_distro":
             packages.append(line)
     except Exception,e: 
         print_error("unable to open repo list: "+str(e))
-    print_output("Building distro "+manifest_distro["package"]+" with "+str(len(packages))+" packages")
+    print_output("Building collection "+manifest_collection["package"]+" with "+str(len(packages))+" packages")
     # for each package
     for package in packages:
         # get package name from the repo URL
@@ -672,14 +672,14 @@ elif command == "make_distro":
         except Exception,e:
             print_error("Unable to load manifest of "+package_name+": "+str(e))
         run("cp -f "+manifest_file+" "+build_dir+"/manifests/manifest_"+manifest["package"]+".yml")
-        # update the distro manifest file by merging the package's modules
+        # update the collection manifest file by merging the package's modules
         for module_object in manifest["modules"]:
-            manifest_distro["modules"].append(module_object)
-        # update the distro manifest file by merging container_config
+            manifest_collection["modules"].append(module_object)
+        # update the collection manifest file by merging container_config
         if "container_config" in manifest:
-            if "container_config" not in manifest_distro:
-                manifest_distro["container_config"] = {}
-            manifest_distro["container_config"].update(manifest["container_config"])
+            if "container_config" not in manifest_collection:
+                manifest_collection["container_config"] = {}
+            manifest_collection["container_config"].update(manifest["container_config"])
         # read the package's Dockerfile
         dockerfile = package_tmp_dir+"/Dockerfile"
         try:
@@ -691,41 +691,41 @@ elif command == "make_distro":
         for line in content.split("\n"):
             if line == "" or line[0] == "#": continue
             # if the same line skip it
-            if line in dockerfile_distro: continue
+            if line in dockerfile_collection: continue
             elif line.startswith("ARG "):
-                if line not in dockerfile_distro["arg"]:
-                 dockerfile_distro["arg"].append(line)
+                if line not in dockerfile_collection["arg"]:
+                 dockerfile_collection["arg"].append(line)
             elif line.startswith("FROM "):
-                if dockerfile_distro["from"] is None:
-                    dockerfile_distro["from"] = line
+                if dockerfile_collection["from"] is None:
+                    dockerfile_collection["from"] = line
                 else:
-                    if line != dockerfile_distro["from"]:
+                    if line != dockerfile_collection["from"]:
                         print_error(package_name+" is belonging to a different base image than the others")
             elif line.startswith("RUN apt-get "):
                 apt_get_packages = line.replace("RUN apt-get update && apt-get install -y ", "").replace(" && apt-get clean && rm -rf /var/lib/apt/lists/*", "").split(" ")
                 for apt_get_package in apt_get_packages:
-                    if apt_get_package not in dockerfile_distro["apt-get"]:
-                        dockerfile_distro["apt-get"].append(apt_get_package)
+                    if apt_get_package not in dockerfile_collection["apt-get"]:
+                        dockerfile_collection["apt-get"].append(apt_get_package)
             elif line.startswith("RUN apk "):
                 apk_packages = line.replace("RUN apk update && apk add ", "").replace(" && rm -rf /var/cache/apk/*", "").split(" ")
                 for apk_package in apk_packages:
-                    if apk_package not in dockerfile_distro["apk"]:
-                        dockerfile_distro["apk"].append(apk_package)
+                    if apk_package not in dockerfile_collection["apk"]:
+                        dockerfile_collection["apk"].append(apk_package)
             elif line.startswith("RUN pip "):
                 if line == "RUN pip install --upgrade setuptools": continue
                 # if there are package-specific install options, isolate the command
                 if "--install-option" in line:
-                    dockerfile_distro["others"].append(line)
+                    dockerfile_collection["others"].append(line)
                 else:
                     pip_packages = line.replace("RUN pip install ", "").split(" ")
                     for pip_package in pip_packages:
-                        if pip_package not in dockerfile_distro["pip"]:
-                            dockerfile_distro["pip"].append(pip_package)
+                        if pip_package not in dockerfile_collection["pip"]:
+                            dockerfile_collection["pip"].append(pip_package)
             elif line.startswith("COPY "):
-                if line not in dockerfile_distro["copy"]:
-                    dockerfile_distro["copy"].append(line)
+                if line not in dockerfile_collection["copy"]:
+                    dockerfile_collection["copy"].append(line)
             else:
-                dockerfile_distro["others"].append(line)
+                dockerfile_collection["others"].append(line)
         # read .gitignore file
         gitignore_file = package_tmp_dir+"/.gitignore"
         if os.path.exists(gitignore_file): 
@@ -738,8 +738,8 @@ elif command == "make_distro":
             for line in content.split("\n"):
                 if line == "" or line[0] == "#": continue
                 # if the same line skip it
-                if line in gitignore_distro: continue
-                gitignore_distro.append(line)
+                if line in gitignore_collection: continue
+                gitignore_collection.append(line)
         # read .dockerignore file
         dockerignore_file = package_tmp_dir+"/.dockerignore"
         if os.path.exists(dockerignore_file): 
@@ -752,8 +752,8 @@ elif command == "make_distro":
             for line in content.split("\n"):
                 if line == "" or line[0] == "#": continue
                 # if the same line skip it
-                if line in dockerignore_distro: continue
-                dockerignore_distro.append(line)
+                if line in dockerignore_collection: continue
+                dockerignore_collection.append(line)
         # move all the files of the downloaded packages in the build directory
         for (current_path, dirnames, filenames) in os.walk(package_tmp_dir): 
             for filename in filenames:
@@ -763,41 +763,41 @@ elif command == "make_distro":
                 if not os.path.exists(build_parent_dir): 
                     os.makedirs(build_parent_dir)
                 run("mv -f "+package_tmp_file+" "+build_file)
-    # build and save the distro Dockerfile
+    # build and save the collection Dockerfile
     try: 
         f = open(build_dir+"/Dockerfile", "w")
-        for arg in dockerfile_distro["arg"]:
+        for arg in dockerfile_collection["arg"]:
             f.write(arg+"\n")
-        f.write(dockerfile_distro["from"]+"\n")
-        if len(dockerfile_distro["apt-get"]) > 0:
-            f.write("RUN apt-get update && apt-get install -y "+" ".join(dockerfile_distro["apt-get"])+" && apt-get clean && rm -rf /var/lib/apt/lists/*\n")
-        if len(dockerfile_distro["apk"]) > 0:
-            f.write("RUN apk update && apk add "+" ".join(dockerfile_distro["apk"])+" && rm -rf /var/cache/apk/*\n")
-        if len(dockerfile_distro["pip"]) > 0:
-            f.write("RUN pip install --upgrade setuptools && pip install "+" ".join(dockerfile_distro["pip"])+"\n")
-        for line in dockerfile_distro["others"]:
+        f.write(dockerfile_collection["from"]+"\n")
+        if len(dockerfile_collection["apt-get"]) > 0:
+            f.write("RUN apt-get update && apt-get install -y "+" ".join(dockerfile_collection["apt-get"])+" && apt-get clean && rm -rf /var/lib/apt/lists/*\n")
+        if len(dockerfile_collection["apk"]) > 0:
+            f.write("RUN apk update && apk add "+" ".join(dockerfile_collection["apk"])+" && rm -rf /var/cache/apk/*\n")
+        if len(dockerfile_collection["pip"]) > 0:
+            f.write("RUN pip install --upgrade setuptools && pip install "+" ".join(dockerfile_collection["pip"])+"\n")
+        for line in dockerfile_collection["others"]:
             f.write(line+"\n")
-        for line in dockerfile_distro["copy"]:
+        for line in dockerfile_collection["copy"]:
             f.write(line+"\n")
         f.close()
     except Exception,e:
-        print_error("Unable to save distro Dockerfile: "+str(e))
+        print_error("Unable to save collection Dockerfile: "+str(e))
     # build and save .gitignore
-    if len(gitignore_distro) > 0:
+    if len(gitignore_collection) > 0:
         try: 
             f = open(build_dir+"/.gitignore", "w")
-            for line in gitignore_distro:
+            for line in gitignore_collection:
                 f.write(line+"\n")
             f.write(tmp_dir.replace(MY_DIRECTORY+"/", "", 1)+"\n")
             f.write(build_dir.replace(MY_DIRECTORY+"/", "", 1)+"\n")
             f.close()
         except Exception,e:
-            print_error("Unable to save distro .gitignore: "+str(e))
+            print_error("Unable to save collection .gitignore: "+str(e))
     # build and save .dockerignore
-    if len(dockerignore_distro) > 0:
+    if len(dockerignore_collection) > 0:
         try: 
             f = open(build_dir+"/.dockerignore", "w")
-            for line in dockerignore_distro:
+            for line in dockerignore_collection:
                 f.write(line+"\n")
             f.write(tmp_dir.replace(MY_DIRECTORY+"/", "", 1)+"\n")
             f.write(build_dir.replace(MY_DIRECTORY+"/", "", 1)+"\n")
@@ -805,17 +805,17 @@ elif command == "make_distro":
             f.write(build_dir.replace(MY_DIRECTORY+"/", "", 1)+"/\n")
             f.close()
         except Exception,e:
-            print_error("Unable to save distro .gitignore: "+str(e))
+            print_error("Unable to save collection .gitignore: "+str(e))
     # keep track of the old revision number in the manifest file
     if old_manifest is not None:
-        manifest_distro["revision"] = old_manifest["revision"]
-    # build and save the distro manifest file
+        manifest_collection["revision"] = old_manifest["revision"]
+    # build and save the collection manifest file
     try: 
         f = open(build_dir+"/manifest.yml", "w")
-        f.write(yaml.safe_dump(manifest_distro, default_flow_style=False))
+        f.write(yaml.safe_dump(manifest_collection, default_flow_style=False))
         f.close()
     except Exception,e:
-        print_error("Unable to save distro manifest file: "+str(e))
+        print_error("Unable to save collection manifest file: "+str(e))
     # for each file of the build directory check if needs to be moved into the main directory
     created = 0
     updated = 0
@@ -841,7 +841,7 @@ elif command == "make_distro":
     # for each file of the main directory check if exists in the build directory, otherwise, delete it
     for (current_path, dirnames, filenames) in os.walk(MY_DIRECTORY): 
         for filename in filenames:
-            if current_path.startswith(distro_dir) or current_path.startswith(MY_DIRECTORY+"/.git"): continue
+            if current_path.startswith(collection_dir) or current_path.startswith(MY_DIRECTORY+"/.git"): continue
             target_file = current_path+os.sep+filename
             build_file = target_file.replace(MY_DIRECTORY, build_dir, 1)
             # if the file does not exist anymore, delete it
