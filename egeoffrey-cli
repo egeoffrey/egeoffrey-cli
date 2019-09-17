@@ -13,7 +13,7 @@ import filecmp
 ## constants
 BRANCH = "development"
 VERSION = 1.0
-REVISION = 19
+REVISION = 20
 MARKETPLACE_URL = "https://api.github.com/repos/egeoffrey/egeoffrey-marketplace/contents/marketplace"
 MARKETPLACE_BRANCH = "master"
 SDK_BRANCH = "development"
@@ -25,19 +25,19 @@ SUPPORTED_MANIFEST_SCHEMA = 2
 
 ## variables
 # debug output 
-debug = False
+DEBUG = False
 # do not require user interaction
-quite = False
+QUITE = False
 # do not push anything out
-offline = False
+OFFLINE = False
 # requested command
-command = ""
+COMMAND = ""
 # arguments to the requested command
-arguments = ""
+ARGUMENTS = ""
 # docker-compose .env 
-env = {}
+ENV = {}
 # docker-compose configuration
-config = {}
+CONFIG = {}
 
 # print out an error message and exit
 def print_error(message):
@@ -50,8 +50,8 @@ def print_warning(message):
     
 # print out a debug message
 def print_debug(message):
-    global debug
-    if debug: print message
+    global DEBUG
+    if DEBUG: print message
 
 # print out a message    
 def print_output(message):
@@ -59,7 +59,7 @@ def print_output(message):
     
 # parse command line arguments
 def parse_command_line():
-    global command, arguments, debug, quite, offline, MY_DIRECTORY, DOCKER_COMPOSE
+    global COMMAND, ARGUMENTS, DEBUG, QUITE, OFFLINE, MY_DIRECTORY, DOCKER_COMPOSE
     skip_next = False
     for i in range(1, len(sys.argv)):
         if skip_next: 
@@ -76,22 +76,22 @@ def parse_command_line():
             skip_next = True
             continue
         if arg == "-v":
-            debug = True
+            DEBUG = True
             continue
         if arg == "-o":
-            offline = True
+            OFFLINE = True
             continue
         if arg == "-q":
-            quite = True
+            QUITE = True
             continue
-        if command == "":
-            command = arg
+        if COMMAND == "":
+            COMMAND = arg
             continue
-        arguments = arguments+" "+arg
-    arguments = arguments.strip()
+        ARGUMENTS = ARGUMENTS+" "+arg
+    ARGUMENTS = ARGUMENTS.strip()
     print_debug("Base directory: "+MY_DIRECTORY)
-    print_debug("Command: "+command)
-    print_debug("Arguments: "+arguments)
+    print_debug("Command: "+COMMAND)
+    print_debug("Arguments: "+ARGUMENTS)
     
 # check if the cli requires to be upgraded
 def requires_upgrade():
@@ -110,7 +110,7 @@ def requires_upgrade():
     
 # load .env file with common docker-compose environment variables
 def load_env():
-    global env
+    global ENV
     env_file = MY_DIRECTORY+"/.env"
     if not os.path.isfile(env_file):
         print_error("the configuration file '.env' cannot be found in "+env_file+". Please switch into eGeoffrey installation directory or provide the directory with the -d option")
@@ -123,10 +123,10 @@ def load_env():
             if "=" not in line: continue
             split = line.split("=")
             # store it into the env variable
-            env[split[0]] = split[1]
+            ENV[split[0]] = split[1]
     except Exception,e: 
         print_error("unable to read environment file from "+env_file+": "+str(e))
-    print_debug("Loaded "+str(len(env))+" env settings")
+    print_debug("Loaded "+str(len(ENV))+" env settings")
 
 # download and return a manifest from a remote git repository
 def get_manifest(package, repository, branch):
@@ -181,7 +181,7 @@ def parse_package(string):
     
 # build the marketplace database
 def get_marketplace(requested_packages=None, package_branch="master"):
-    global env
+    global ENV
     marketplace = {}
     # get the list of all items in the marketplace
     marketplace_index = list_marketplace()
@@ -220,13 +220,13 @@ def get_marketplace(requested_packages=None, package_branch="master"):
         
 # load docker-compose configuration
 def load_configuration():
-    global config
+    global CONFIG
     docker_compose_file = MY_DIRECTORY+"/"+DOCKER_COMPOSE
     # load docker-compose common variables
     load_env()
     # if docker-compose file does not exist, make an empty version
     if not os.path.isfile(docker_compose_file): 
-        config = {
+        CONFIG = {
             "version": "3",
             "services": {},
             "networks": {
@@ -239,18 +239,18 @@ def load_configuration():
         print_debug("Loading docker-compose configuration from "+docker_compose_file)
         try:
             with open(docker_compose_file) as f: content = f.read()
-            config = yaml.load(content, Loader=yaml.SafeLoader)
+            CONFIG = yaml.load(content, Loader=yaml.SafeLoader)
         except Exception,e:
             print_error("Unable to load eGeoffrey docker configuration: "+str(e))
         
 # save docker-compose configuration
 def save_configuration():
-    global config
+    global CONFIG
     docker_compose_file = MY_DIRECTORY+"/"+DOCKER_COMPOSE
     print_debug("Saving docker-compose configuration to "+docker_compose_file)
     try: 
         f = open(docker_compose_file, "w")
-        f.write(yaml.safe_dump(config, default_flow_style=False))
+        f.write(yaml.safe_dump(CONFIG, default_flow_style=False))
         f.close()
     except Exception,e:
         print_error("Unable to save eGeoffrey docker configuration: "+str(e))
@@ -298,7 +298,7 @@ def print_usage():
     print_output("Options:")
     print_output("  -d <directory>                      set the working directory")
     print_output("  -f <filename>                       set custom docker-compose.yml filename")
-    print_output("  -v                                  enable debug output")
+    print_output("  -v                                  enable DEBUG output")
     print_output("  -q                                  quite mode - do not run interactively")
     print_output("  -o                                  offline mode")
     print_output("")
@@ -333,15 +333,15 @@ def print_usage():
 # parse provided command line
 parse_command_line()
 # check if running the latest version
-if not offline:
+if not OFFLINE and COMMAND != "upgrade":
     version = requires_upgrade()
     if version is not None: print_warning("a new version of egeoffrey-cli is available ("+version+"), run 'egeoffrey-cli upgrade' to upgrade")
 
 # do what requested by the user
 
 # print out information on a given package
-if command == "info":
-    package = arguments
+if COMMAND == "info":
+    package = ARGUMENTS
     if package == "": print_error("a package name must be provided")
     marketplace = get_marketplace([package])
     package_name, package_branch = parse_package(package)
@@ -362,15 +362,15 @@ if command == "info":
     print_output("")
     
 # install a package
-elif command == "install":
+elif COMMAND == "install":
     load_configuration()
-    packages = arguments.split(" ")
+    packages = ARGUMENTS.split(" ")
     if len(packages) == 0: print_error("at least a package name must be provided")
     marketplace = get_marketplace(packages)
     for package in packages:
         package_name, package_branch = parse_package(package)
         # ensure package is not already installed
-        if package_name in config["services"]:
+        if package_name in CONFIG["services"]:
             print_output(package_name+" is already installed")
             continue
         # ensure package exists in the marketplace
@@ -389,7 +389,7 @@ elif command == "install":
             # add env_file
             service["env_file"] = ".env"
             # add image
-            service["image"] = manifest["dockerhub"]+":"+package_branch+"-"+env["ARCHITECTURE"]
+            service["image"] = manifest["dockerhub"]+":"+package_branch+"-"+ENV["ARCHITECTURE"]
             # add EGEOFFREY_MODULES variable
             if "modules" in manifest:
                 modules = []
@@ -421,7 +421,7 @@ elif command == "install":
             # TODO: add restart = always
             #service["restart"] = "always"
             # add the new service
-            config["services"][package_name] = service
+            CONFIG["services"][package_name] = service
         except Exception,e:
             print_error("installation of package "+package_name+":"+package_branch+" failed: "+str(e))
         print_output(package_name+":"+package_branch+" installed successfully")
@@ -429,33 +429,33 @@ elif command == "install":
     save_configuration()
     
 # list packages available to install
-elif command == "list_available":
+elif COMMAND == "list_available":
     load_configuration()
-    branch = arguments if arguments != "" else "master"
+    branch = ARGUMENTS if ARGUMENTS != "" else "master"
     marketplace = get_marketplace(None, branch)
     for package in sorted(marketplace):
         # skip already installed packages
-        if package in config["services"]: continue
+        if package in CONFIG["services"]: continue
         print_output(package+": "+marketplace[package]["description"])
 
 # list packages already installed
-elif command == "list_installed":
+elif COMMAND == "list_installed":
     load_configuration()
-    for service in sorted(config["services"]):
+    for service in sorted(CONFIG["services"]):
         print_output(service)
         
 # run docker logs
-elif command == "logs":
-    options = arguments.split(" ") if arguments != "" else []
+elif COMMAND == "logs":
+    options = ARGUMENTS.split(" ") if ARGUMENTS != "" else []
     run_docker_compose(["logs"]+options)
     
 # reload the configuration
-elif command == "reload":
+elif COMMAND == "reload":
     run_docker_compose(["up", "-d", "--remove-orphans"])
 
 # search for a package
-elif command == "search":
-    search = arguments.split(" ")
+elif COMMAND == "search":
+    search = ARGUMENTS.split(" ")
     if len(search) == 0 or len(search) > 2: print_error("invalid search string provided")
     branch = "master"
     if len(search) == 2: branch = search[1]
@@ -467,40 +467,40 @@ elif command == "search":
             print_output(package+": "+marketplace[package]["description"])
             
 # start services
-elif command == "start":
-    packages = arguments.split(" ") if arguments != "" else []
+elif COMMAND == "start":
+    packages = ARGUMENTS.split(" ") if ARGUMENTS != "" else []
     run_docker_compose(["up", "-d", "--remove-orphans"]+packages)
     
 # run docker stats
-elif command == "stats":
+elif COMMAND == "stats":
     run_docker(["stats", "--no-stream"])
 
 # run docker ps
-elif command == "status":
+elif COMMAND == "status":
     run_docker_compose(["ps"])
 
 # stop services
-elif command == "stop":
+elif COMMAND == "stop":
     run_docker_compose(["down"])
     
 # update an installed packages
-elif command == "update":
-    packages = arguments.split(" ") if arguments != "" else []
+elif COMMAND == "update":
+    packages = ARGUMENTS.split(" ") if ARGUMENTS != "" else []
     run_docker_compose(["pull"]+packages)
     
 # uninstall a package
-elif command == "uninstall":
+elif COMMAND == "uninstall":
     load_configuration()
-    packages = arguments.split(" ")
+    packages = ARGUMENTS.split(" ")
     if len(packages) == 0: print_error("at least a package name must be provided")
     for package in packages:
         package_name, package_branch = parse_package(package)
         # ensure package is installed
-        if package_name not in config["services"]:
+        if package_name not in CONFIG["services"]:
             print_output(package_name+" is not installed")
             continue
         # remove the package from the docker-compose file
-        del config["services"][package_name]
+        del CONFIG["services"][package_name]
         print_output(package_name+" uninstalled successfully")
     # save the updated configuration file
     save_configuration()
@@ -508,8 +508,8 @@ elif command == "uninstall":
 ## MAIN - BUILD ##
 
 # commit changes to a git repository and push upstream
-elif command == "commit":
-    if arguments == "": print_error("provide a description for this commit")
+elif COMMAND == "commit":
+    if ARGUMENTS == "": print_error("provide a description for this commit")
     # read the manifest file
     manifest_file = MY_DIRECTORY+"/manifest.yml"
     manifest = read_manifest(manifest_file)
@@ -522,7 +522,7 @@ elif command == "commit":
     if branch != manifest["branch"]: print_error(MY_DIRECTORY+" current branch does not match with the manifest's branch")
     if "nothing to commit" not in run_git(["status"]):
         # ask the user before proceeding
-        if not quite:
+        if not QUITE:
             # add the new files to git
             print_output(run_git(["add", "."]))
             print_output(run_git(["status"]))
@@ -542,14 +542,77 @@ elif command == "commit":
         except Exception,e:
             print_error("unable to write the manifest file: "+str(e))
         print_output("Setting new version for "+manifest["package"]+" to "+str(manifest["version"])+"-"+str(manifest["revision"])+" ("+str(manifest["branch"])+")")
+        # generate a README.md file
+        package_split = manifest["package"].split("-")
+        readme = ""
+        readme = readme+"# "+manifest["package"]+"\n\n"
+        readme = readme+"This is an eGeoffrey "+package_split[1]+" package.\n"
+        readme = readme+"\n## Description\n\n"
+        readme = readme+manifest["description"]+".\n"
+        readme = readme+"\n## Install\n\n"
+        readme = readme+"To install this package, run the following command from within your eGeoffrey installation directory:\n"
+        readme = readme+"```\negeoffrey-cli install "+manifest["package"]+"\n```\n"
+        readme = readme+"After the installation, remember to run also `egeoffrey-cli start` to ensure the Docker image of the package is effectively downloaded and started.\n"
+        readme = readme+"To validate the installation, go and visit the *'eGeoffrey Admin'* / *'Packages'* page of your eGeoffrey instance. All the modules, default configuration files and out-of-the-box contents if any will be automatically deployed and made available."
+        if len(manifest["modules"]) > 0:
+            readme = readme+"\n## Content\n\n"
+            readme = readme+"The following modules are included in this package.\n\nFor each module, if requiring a configuration file to start, its settings will be listed under *'Module configuration'*. Additionally, if the module is a service, the configuration expected to be provided by each registered sensor associated to the service is listed under *'Service configuration'*.\n\nTo configure each module included in this package, once started, click on the *'Edit Configuration'* button on the *'eGeoffrey Admin'* / *'Modules'* page of your eGeoffrey instance.\n"
+            for module_object in manifest["modules"]:
+                for module_name in module_object:
+                    module = module_object[module_name]
+                    readme = readme+"- **"+module_name+"**: "
+                    if "description" in module: 
+                        readme = readme+module["description"][0].lower()+module["description"][1:]
+                    readme = readme+"\n"
+                    if "module_configuration" in module: 
+                        readme = readme+"  - Module configuration:\n"
+                        for entry in module["module_configuration"]:
+                            required = "*" if "required" in entry and entry["required"] else ""
+                            placeholder = " (e.g. "+str(entry["placeholder"])+")" if "placeholder" in entry else ""
+                            readme = readme+"    - *"+entry["name"]+"*"+required+": "+entry["description"][0].lower()+entry["description"][1:]+placeholder+"\n"
+                    if "service_configuration" in module: 
+                        readme = readme+"  - Service configuration:\n"
+                        for mode in module["service_configuration"]:
+                            readme = readme+"    - Mode '"+mode+"':\n"
+                            for entry in module["service_configuration"][mode]:
+                                required = "*" if "required" in entry and entry["required"] else ""
+                                placeholder = " (e.g. "+str(entry["placeholder"])+")" if "placeholder" in entry else ""
+                                readme = readme+"      - *"+entry["name"]+"*"+required+": "+entry["description"][0].lower()+entry["description"][1:]+placeholder+"\n"
+        readme = readme+"\n## Contribute\n\n"
+        readme = readme+"If you are the author of this package, simply clone the repository, apply any change you would need and run the following command from within this package's directory to commit your changes and automatically push them to Github:\n"
+        readme = readme+"```\negeoffrey-cli commit \"<comment>\"\n```\n"
+        readme = readme+"After taking this action, remember you still need to build (see below) the package (e.g. the Docker image) to make it available for installation.\n\n"
+        readme = readme+"If you are a user willing to contribute to somebody's else package, submit your PR (Pull Request); the author will take care of validating your contributation, merging the new content and building a new version.\n"
+        readme = readme+"\n## Build\n\n"
+        readme = readme+"Building is required only if you are the author of the package. To build a Docker image and automatically push it to [Docker Hub](https://hub.docker.com/r/"+manifest["dockerhub"]+"), run the following command from within this package's directory:\n"
+        readme = readme+"```\negeoffrey-cli build "+manifest["package"]+" <amd64|arm>\n```\n"
+        if "container_config" in manifest:
+            readme = readme+"To function properly, when running in a Docker container, the following additional configuration settings has to be added to e.g. your docker-compose.yml file (when installing through egeoffrey-cli, this is not needed since done automatically upon installation):\n"
+            readme = readme+"```\n"+yaml.safe_dump(manifest["container_config"], default_flow_style=False)+"```\n"
+        readme = readme+"\n## Uninstall\n\n"
+        readme = readme+"To uninstall this package, run the following command from within your eGeoffrey installation directory:\n"
+        readme = readme+"```\negeoffrey-cli uninstall "+manifest["package"]+"\n```\n"
+        readme = readme+"Remember to run also `egeoffrey-cli start` to ensure the changes are correctly applied."
+        readme = readme+"\n## Tags\n\n"
+        readme = readme+"The following tags are associated to this package:\n"
+        readme = readme+"```\n"+manifest["tags"]+"\n```\n"
+        readme = readme+"\n## Version\n\n"
+        readme = readme+"The version of this "+manifest["package"]+" is "+str(manifest["version"])+"-"+str(manifest["revision"])+" on the "+str(manifest["branch"])+" branch.\n"
+        # save the README file
+        try:
+            f = open(MY_DIRECTORY+"/README.md", "w")
+            f.write(readme)
+            f.close()
+        except Exception,e:
+            print_error("Unable to save README file: "+str(e))
         # add the new files to git 
         print_output(run_git(["add", "."]))
         # print out the status
         print_output(run_git(["status"]))
         print_output("\nPublishing changes to the remote repository...")
         # commit the changes
-        print_output(run_git(["commit", "-m", arguments]))
-        if not offline:
+        print_output(run_git(["commit", "-m", ARGUMENTS]))
+        if not OFFLINE:
             # push the changes to the remote repository
             print_output(run_git(["push", "origin", manifest["branch"]]))
             # TODO: for master branch, tag with version number
@@ -557,9 +620,9 @@ elif command == "commit":
         print_output("Nothing to commit on "+manifest["package"])
 
 # build a docker image and push upstream
-elif command == "build":    
-    if arguments == "": print_error("provide an architecture or a set of architectures to build against (e.g. amd64, arm)")
-    architectures = arguments.split(",")
+elif COMMAND == "build":    
+    if ARGUMENTS == "": print_error("provide an architecture or a set of architectures to build against (e.g. amd64, arm)")
+    architectures = ARGUMENTS.split(",")
     # read the manifest file
     manifest = read_manifest(MY_DIRECTORY+"/manifest.yml")
     # for each architecture
@@ -570,18 +633,18 @@ elif command == "build":
         image = manifest["dockerhub"]+":"+manifest["branch"]+"-"+architecture
         print_output("\nBuilding docker image "+image+"...")
         run_docker(["build", "--rm", "--build-arg", "SDK_VERSION="+SDK_BRANCH, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image, MY_DIRECTORY])
-        if not offline:
+        if not OFFLINE:
             # push the image to dockerhub
             print_output("\nPublishing docker image "+image+"...")
             run_docker(["push", image])
             # TODO: for master branch, tag with version number
         
 # build a docker image and push upstream
-elif command == "build_sdk":
-    arguments = arguments.split(" ")
-    if len(arguments) != 2: print_error("provide a SDK image and architecture(s) to build against")
-    sdk_image = arguments[0]
-    architectures = arguments[1].split(",")
+elif COMMAND == "build_sdk":
+    ARGUMENTS = ARGUMENTS.split(" ")
+    if len(ARGUMENTS) != 2: print_error("provide a SDK image and architecture(s) to build against")
+    sdk_image = ARGUMENTS[0]
+    architectures = ARGUMENTS[1].split(",")
     # read the manifest file
     manifest = read_manifest(MY_DIRECTORY+"/sdk/manifest.yml")
     # for each architecture
@@ -592,13 +655,13 @@ elif command == "build_sdk":
         image = manifest["dockerhub"]+"-"+sdk_image+":"+manifest["branch"]+"-"+architecture
         print_output("\nBuilding docker image "+image+"...")
         run_docker(["build", "--rm", "--file", MY_DIRECTORY+"/Dockerfile-"+sdk_image, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image, MY_DIRECTORY])
-        if not offline:
+        if not OFFLINE:
             # push the image to dockerhub
             print_output("\nPublishing docker image "+image+"...")
             run_docker(["push", image])
     
 # make a collection using the files provided in the collection directory
-elif command == "make_collection":
+elif COMMAND == "make_collection":
     # variables
     collection_dir = MY_DIRECTORY+"/collection"
     if not os.path.isdir(collection_dir):
@@ -863,7 +926,7 @@ elif command == "make_collection":
 ## MAIN - GENERAL ##
 
 # upgrade egeoffrey-cli to the latest version
-elif command == "upgrade":
+elif COMMAND == "upgrade":
     # upgrade needed
     version = requires_upgrade()
     if version is not None:
@@ -885,7 +948,7 @@ elif command == "upgrade":
         print_output("Already at the latest version - v"+str(VERSION)+"-"+str(REVISION)+" ("+str(BRANCH)+")")
 
 # print out this script version
-elif command == "version":
+elif COMMAND == "version":
     print_output("egeoffrey-cli v"+str(VERSION)+"-"+str(REVISION)+" ("+str(BRANCH)+")")
 
 else:
