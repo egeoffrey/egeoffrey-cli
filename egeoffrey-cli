@@ -11,12 +11,12 @@ import requests
 import filecmp
 
 ## constants
-BRANCH = "development"
+BRANCH = "master"
 VERSION = 1.0
 REVISION = 20
 MARKETPLACE_URL = "https://api.github.com/repos/egeoffrey/egeoffrey-marketplace/contents/marketplace"
 MARKETPLACE_BRANCH = "master"
-SDK_BRANCH = "development"
+SDK_BRANCH = "master"
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/version.yml"
 MY_DOWNLOAD_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/egeoffrey-cli"
 MY_DIRECTORY = os.getcwd()
