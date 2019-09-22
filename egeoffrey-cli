@@ -13,7 +13,7 @@ import filecmp
 ## constants
 BRANCH = "master"
 VERSION = 1.0
-REVISION = 20
+REVISION = 22
 MARKETPLACE_URL = "https://api.github.com/repos/egeoffrey/egeoffrey-marketplace/contents/marketplace"
 MARKETPLACE_BRANCH = "master"
 SDK_BRANCH = "master"
@@ -38,6 +38,8 @@ ARGUMENTS = ""
 ENV = {}
 # docker-compose configuration
 CONFIG = {}
+# force a specific action
+FORCE = False
 
 # print out an error message and exit
 def print_error(message):
@@ -59,7 +61,7 @@ def print_output(message):
     
 # parse command line arguments
 def parse_command_line():
-    global COMMAND, ARGUMENTS, DEBUG, QUITE, OFFLINE, MY_DIRECTORY, DOCKER_COMPOSE
+    global COMMAND, ARGUMENTS, DEBUG, QUITE, OFFLINE, FORCE, MY_DIRECTORY, DOCKER_COMPOSE
     skip_next = False
     for i in range(1, len(sys.argv)):
         if skip_next: 
@@ -71,12 +73,15 @@ def parse_command_line():
             MY_DIRECTORY = sys.argv[i+1].rstrip("/")
             skip_next = True
             continue
-        if arg == "-f":
+        if arg == "-c":
             DOCKER_COMPOSE = sys.argv[i+1]
             skip_next = True
             continue
         if arg == "-v":
             DEBUG = True
+            continue
+        if arg == "-f":
+            FORCE = True
             continue
         if arg == "-o":
             OFFLINE = True
@@ -297,10 +302,11 @@ def print_usage():
     print_output("")
     print_output("Options:")
     print_output("  -d <directory>                      set the working directory")
-    print_output("  -f <filename>                       set custom docker-compose.yml filename")
+    print_output("  -c <filename>                       set custom docker-compose.yml filename")
     print_output("  -v                                  enable DEBUG output")
     print_output("  -q                                  quite mode - do not run interactively")
     print_output("  -o                                  offline mode")
+    print_output("  -f                                  force an action")
     print_output("")
     print_output("General commands:")
     print_output("  upgrade                             Upgrade egeoffrey-cli to the latest version")
@@ -323,6 +329,7 @@ def print_usage():
     print_output("")
     print_output("Build commands:")
     print_output("  commit '<description>'              Commit changes to the local and remote git repository")
+    print_output("  commit_sdk '<description>'          Commit SDK changes to the local and remote git repository")
     print_output("  build <amd64,arm>                   Build a docker image and push it upstream")
     print_output("  build_sdk <image> <amd64,arm>       Build a SDK docker image and push it upstream")
     print_output("  make_collection                     Create a collection including the configured packages")
@@ -508,10 +515,11 @@ elif COMMAND == "uninstall":
 ## MAIN - BUILD ##
 
 # commit changes to a git repository and push upstream
-elif COMMAND == "commit":
+elif COMMAND == "commit" or COMMAND == "commit_sdk":
     if ARGUMENTS == "": print_error("provide a description for this commit")
     # read the manifest file
     manifest_file = MY_DIRECTORY+"/manifest.yml"
+    if COMMAND == "commit_sdk": manifest_file = MY_DIRECTORY+"/sdk/manifest.yml"
     manifest = read_manifest(manifest_file)
     # ensure we are in the same branch of the manifest
     output = run_git(["branch"])
@@ -520,7 +528,7 @@ elif COMMAND == "commit":
         if line.startswith("* "): branch = line.replace("* ","")
     if branch is None: print_error("unable to determine current branch of "+MY_DIRECTORY)
     if branch != manifest["branch"]: print_error(MY_DIRECTORY+" current branch does not match with the manifest's branch")
-    if "nothing to commit" not in run_git(["status"]):
+    if "nothing to commit" not in run_git(["status"]) or FORCE:
         # ask the user before proceeding
         if not QUITE:
             # add the new files to git
@@ -543,68 +551,69 @@ elif COMMAND == "commit":
             print_error("unable to write the manifest file: "+str(e))
         print_output("Setting new version for "+manifest["package"]+" to "+str(manifest["version"])+"-"+str(manifest["revision"])+" ("+str(manifest["branch"])+")")
         # generate a README.md file
-        package_split = manifest["package"].split("-")
-        readme = ""
-        readme = readme+"# "+manifest["package"]+"\n\n"
-        readme = readme+"This is an eGeoffrey "+package_split[1]+" package.\n"
-        readme = readme+"\n## Description\n\n"
-        readme = readme+manifest["description"]+".\n"
-        readme = readme+"\n## Install\n\n"
-        readme = readme+"To install this package, run the following command from within your eGeoffrey installation directory:\n"
-        readme = readme+"```\negeoffrey-cli install "+manifest["package"]+"\n```\n"
-        readme = readme+"After the installation, remember to run also `egeoffrey-cli start` to ensure the Docker image of the package is effectively downloaded and started.\n"
-        readme = readme+"To validate the installation, go and visit the *'eGeoffrey Admin'* / *'Packages'* page of your eGeoffrey instance. All the modules, default configuration files and out-of-the-box contents if any will be automatically deployed and made available."
-        if len(manifest["modules"]) > 0:
-            readme = readme+"\n## Content\n\n"
-            readme = readme+"The following modules are included in this package.\n\nFor each module, if requiring a configuration file to start, its settings will be listed under *'Module configuration'*. Additionally, if the module is a service, the configuration expected to be provided by each registered sensor associated to the service is listed under *'Service configuration'*.\n\nTo configure each module included in this package, once started, click on the *'Edit Configuration'* button on the *'eGeoffrey Admin'* / *'Modules'* page of your eGeoffrey instance.\n"
-            for module_object in manifest["modules"]:
-                for module_name in module_object:
-                    module = module_object[module_name]
-                    readme = readme+"- **"+module_name+"**: "
-                    if "description" in module: 
-                        readme = readme+module["description"][0].lower()+module["description"][1:]
-                    readme = readme+"\n"
-                    if "module_configuration" in module: 
-                        readme = readme+"  - Module configuration:\n"
-                        for entry in module["module_configuration"]:
-                            required = "*" if "required" in entry and entry["required"] else ""
-                            placeholder = " (e.g. "+str(entry["placeholder"])+")" if "placeholder" in entry else ""
-                            readme = readme+"    - *"+entry["name"]+"*"+required+": "+entry["description"][0].lower()+entry["description"][1:]+placeholder+"\n"
-                    if "service_configuration" in module: 
-                        readme = readme+"  - Service configuration:\n"
-                        for mode in module["service_configuration"]:
-                            readme = readme+"    - Mode '"+mode+"':\n"
-                            for entry in module["service_configuration"][mode]:
+        if COMMAND != "commit_sdk":
+            package_split = manifest["package"].split("-")
+            readme = ""
+            readme = readme+"# "+manifest["package"]+"\n\n"
+            readme = readme+"This is an eGeoffrey "+package_split[1]+" package.\n"
+            readme = readme+"\n## Description\n\n"
+            readme = readme+manifest["description"]+".\n"
+            readme = readme+"\n## Install\n\n"
+            readme = readme+"To install this package, run the following command from within your eGeoffrey installation directory:\n"
+            readme = readme+"```\negeoffrey-cli install "+manifest["package"]+"\n```\n"
+            readme = readme+"After the installation, remember to run also `egeoffrey-cli start` to ensure the Docker image of the package is effectively downloaded and started.\n"
+            readme = readme+"To validate the installation, go and visit the *'eGeoffrey Admin'* / *'Packages'* page of your eGeoffrey instance. All the modules, default configuration files and out-of-the-box contents if any will be automatically deployed and made available."
+            if len(manifest["modules"]) > 0:
+                readme = readme+"\n## Content\n\n"
+                readme = readme+"The following modules are included in this package.\n\nFor each module, if requiring a configuration file to start, its settings will be listed under *'Module configuration'*. Additionally, if the module is a service, the configuration expected to be provided by each registered sensor associated to the service is listed under *'Service configuration'*.\n\nTo configure each module included in this package, once started, click on the *'Edit Configuration'* button on the *'eGeoffrey Admin'* / *'Modules'* page of your eGeoffrey instance.\n"
+                for module_object in manifest["modules"]:
+                    for module_name in module_object:
+                        module = module_object[module_name]
+                        readme = readme+"- **"+module_name+"**: "
+                        if "description" in module: 
+                            readme = readme+module["description"][0].lower()+module["description"][1:]
+                        readme = readme+"\n"
+                        if "module_configuration" in module: 
+                            readme = readme+"  - Module configuration:\n"
+                            for entry in module["module_configuration"]:
                                 required = "*" if "required" in entry and entry["required"] else ""
                                 placeholder = " (e.g. "+str(entry["placeholder"])+")" if "placeholder" in entry else ""
-                                readme = readme+"      - *"+entry["name"]+"*"+required+": "+entry["description"][0].lower()+entry["description"][1:]+placeholder+"\n"
-        readme = readme+"\n## Contribute\n\n"
-        readme = readme+"If you are the author of this package, simply clone the repository, apply any change you would need and run the following command from within this package's directory to commit your changes and automatically push them to Github:\n"
-        readme = readme+"```\negeoffrey-cli commit \"<comment>\"\n```\n"
-        readme = readme+"After taking this action, remember you still need to build (see below) the package (e.g. the Docker image) to make it available for installation.\n\n"
-        readme = readme+"If you are a user willing to contribute to somebody's else package, submit your PR (Pull Request); the author will take care of validating your contributation, merging the new content and building a new version.\n"
-        readme = readme+"\n## Build\n\n"
-        readme = readme+"Building is required only if you are the author of the package. To build a Docker image and automatically push it to [Docker Hub](https://hub.docker.com/r/"+manifest["dockerhub"]+"), run the following command from within this package's directory:\n"
-        readme = readme+"```\negeoffrey-cli build "+manifest["package"]+" <amd64|arm>\n```\n"
-        if "container_config" in manifest:
-            readme = readme+"To function properly, when running in a Docker container, the following additional configuration settings has to be added to e.g. your docker-compose.yml file (when installing through egeoffrey-cli, this is not needed since done automatically upon installation):\n"
-            readme = readme+"```\n"+yaml.safe_dump(manifest["container_config"], default_flow_style=False)+"```\n"
-        readme = readme+"\n## Uninstall\n\n"
-        readme = readme+"To uninstall this package, run the following command from within your eGeoffrey installation directory:\n"
-        readme = readme+"```\negeoffrey-cli uninstall "+manifest["package"]+"\n```\n"
-        readme = readme+"Remember to run also `egeoffrey-cli start` to ensure the changes are correctly applied."
-        readme = readme+"\n## Tags\n\n"
-        readme = readme+"The following tags are associated to this package:\n"
-        readme = readme+"```\n"+manifest["tags"]+"\n```\n"
-        readme = readme+"\n## Version\n\n"
-        readme = readme+"The version of this "+manifest["package"]+" is "+str(manifest["version"])+"-"+str(manifest["revision"])+" on the "+str(manifest["branch"])+" branch.\n"
-        # save the README file
-        try:
-            f = open(MY_DIRECTORY+"/README.md", "w")
-            f.write(readme)
-            f.close()
-        except Exception,e:
-            print_error("Unable to save README file: "+str(e))
+                                readme = readme+"    - *"+entry["name"]+"*"+required+": "+entry["description"][0].lower()+entry["description"][1:]+placeholder+"\n"
+                        if "service_configuration" in module: 
+                            readme = readme+"  - Service configuration:\n"
+                            for mode in module["service_configuration"]:
+                                readme = readme+"    - Mode '"+mode+"':\n"
+                                for entry in module["service_configuration"][mode]:
+                                    required = "*" if "required" in entry and entry["required"] else ""
+                                    placeholder = " (e.g. "+str(entry["placeholder"])+")" if "placeholder" in entry else ""
+                                    readme = readme+"      - *"+entry["name"]+"*"+required+": "+entry["description"][0].lower()+entry["description"][1:]+placeholder+"\n"
+            readme = readme+"\n## Contribute\n\n"
+            readme = readme+"If you are the author of this package, simply clone the repository, apply any change you would need and run the following command from within this package's directory to commit your changes and automatically push them to Github:\n"
+            readme = readme+"```\negeoffrey-cli commit \"<comment>\"\n```\n"
+            readme = readme+"After taking this action, remember you still need to build (see below) the package (e.g. the Docker image) to make it available for installation.\n\n"
+            readme = readme+"If you are a user willing to contribute to somebody's else package, submit your PR (Pull Request); the author will take care of validating your contributation, merging the new content and building a new version.\n"
+            readme = readme+"\n## Build\n\n"
+            readme = readme+"Building is required only if you are the author of the package. To build a Docker image and automatically push it to [Docker Hub](https://hub.docker.com/r/"+manifest["dockerhub"]+"), run the following command from within this package's directory:\n"
+            readme = readme+"```\negeoffrey-cli build "+manifest["package"]+" <amd64|arm>\n```\n"
+            if "container_config" in manifest:
+                readme = readme+"To function properly, when running in a Docker container, the following additional configuration settings has to be added to e.g. your docker-compose.yml file (when installing through egeoffrey-cli, this is not needed since done automatically upon installation):\n"
+                readme = readme+"```\n"+yaml.safe_dump(manifest["container_config"], default_flow_style=False)+"```\n"
+            readme = readme+"\n## Uninstall\n\n"
+            readme = readme+"To uninstall this package, run the following command from within your eGeoffrey installation directory:\n"
+            readme = readme+"```\negeoffrey-cli uninstall "+manifest["package"]+"\n```\n"
+            readme = readme+"Remember to run also `egeoffrey-cli start` to ensure the changes are correctly applied."
+            readme = readme+"\n## Tags\n\n"
+            readme = readme+"The following tags are associated to this package:\n"
+            readme = readme+"```\n"+manifest["tags"]+"\n```\n"
+            readme = readme+"\n## Version\n\n"
+            readme = readme+"The version of this "+manifest["package"]+" is "+str(manifest["version"])+"-"+str(manifest["revision"])+" on the "+str(manifest["branch"])+" branch.\n"
+            # save the README file
+            try:
+                f = open(MY_DIRECTORY+"/README.md", "w")
+                f.write(readme)
+                f.close()
+            except Exception,e:
+                print_error("Unable to save README file: "+str(e))
         # add the new files to git 
         print_output(run_git(["add", "."]))
         # print out the status
@@ -612,54 +621,56 @@ elif COMMAND == "commit":
         print_output("\nPublishing changes to the remote repository...")
         # commit the changes
         print_output(run_git(["commit", "-m", ARGUMENTS]))
+        # if on the master branch, also tag with version number
+        if manifest["branch"] == "master":
+            print_output(run_git(["tag", "-f", str(manifest["version"])]))
+        # push the changes to the remote repository
         if not OFFLINE:
-            # push the changes to the remote repository
             print_output(run_git(["push", "origin", manifest["branch"]]))
-            # TODO: for master branch, tag with version number
+            if manifest["branch"] == "master":
+                print_output(run_git(["push", "origin", str(manifest["version"])]))
     else:
         print_output("Nothing to commit on "+manifest["package"])
 
 # build a docker image and push upstream
-elif COMMAND == "build":    
-    if ARGUMENTS == "": print_error("provide an architecture or a set of architectures to build against (e.g. amd64, arm)")
-    architectures = ARGUMENTS.split(",")
+elif COMMAND == "build" or  COMMAND == "build_sdk":
+    if COMMAND == "build":
+        if ARGUMENTS == "": print_error("provide an architecture or a set of architectures to build against (e.g. amd64, arm)")
+        architectures = ARGUMENTS.split(",")
+        manifest_file = MY_DIRECTORY+"/manifest.yml"
+    elif COMMAND == "build_sdk":
+        ARGUMENTS = ARGUMENTS.split(" ")
+        if len(ARGUMENTS) != 2: print_error("provide a SDK image and architecture(s) to build against")
+        sdk_image = ARGUMENTS[0]
+        architectures = ARGUMENTS[1].split(",")
+        manifest_file = MY_DIRECTORY+"/sdk/manifest.yml"
     # read the manifest file
-    manifest = read_manifest(MY_DIRECTORY+"/manifest.yml")
+    manifest = read_manifest(manifest_file)
     # for each architecture
     for architecture in architectures:
         if architecture not in ["amd64", "arm"]: print_error("Invalid architecture "+architecture)
         if architecture == "arm": architecture = "arm32v6"
         # build the docker image
-        image = manifest["dockerhub"]+":"+manifest["branch"]+"-"+architecture
-        print_output("\nBuilding docker image "+image+"...")
-        run_docker(["build", "--rm", "--build-arg", "SDK_VERSION="+SDK_BRANCH, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image, MY_DIRECTORY])
+        print_output("\nBuilding docker image...")
+        if COMMAND == "build":
+            image_branch = manifest["dockerhub"]+":"+manifest["branch"]+"-"+architecture
+            image_version = manifest["dockerhub"]+":"+str(manifest["version"])+"-"+architecture
+            args = ["build", "--rm", "--build-arg", "SDK_VERSION="+SDK_BRANCH, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image_branch, MY_DIRECTORY]
+        elif COMMAND == "build_sdk":
+            image_branch = manifest["dockerhub"]+"-"+sdk_image+":"+manifest["branch"]+"-"+architecture
+            image_version = manifest["dockerhub"]+"-"+sdk_image+":"+str(manifest["version"])+"-"+architecture
+            args = ["build", "--rm", "--file", MY_DIRECTORY+"/Dockerfile-"+sdk_image, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image_branch, MY_DIRECTORY]
+        # if on master, also tag the image with the version number
+        if manifest["branch"] == "master": 
+            args.extend(["--tag", image_version])
+        run_docker(args)
         if not OFFLINE:
             # push the image to dockerhub
-            print_output("\nPublishing docker image "+image+"...")
-            run_docker(["push", image])
-            # TODO: for master branch, tag with version number
-        
-# build a docker image and push upstream
-elif COMMAND == "build_sdk":
-    ARGUMENTS = ARGUMENTS.split(" ")
-    if len(ARGUMENTS) != 2: print_error("provide a SDK image and architecture(s) to build against")
-    sdk_image = ARGUMENTS[0]
-    architectures = ARGUMENTS[1].split(",")
-    # read the manifest file
-    manifest = read_manifest(MY_DIRECTORY+"/sdk/manifest.yml")
-    # for each architecture
-    for architecture in architectures:
-        if architecture not in ["amd64", "arm"]: print_error("Invalid architecture "+architecture)
-        if architecture == "arm" : architecture = "arm32v6"
-        # build the docker image
-        image = manifest["dockerhub"]+"-"+sdk_image+":"+manifest["branch"]+"-"+architecture
-        print_output("\nBuilding docker image "+image+"...")
-        run_docker(["build", "--rm", "--file", MY_DIRECTORY+"/Dockerfile-"+sdk_image, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image, MY_DIRECTORY])
-        if not OFFLINE:
-            # push the image to dockerhub
-            print_output("\nPublishing docker image "+image+"...")
-            run_docker(["push", image])
-    
+            print_output("\nPublishing docker image "+image_branch+"...")
+            run_docker(["push", image_branch])
+            if manifest["branch"] == "master": 
+                run_docker(["push", image_version])
+            
 # make a collection using the files provided in the collection directory
 elif COMMAND == "make_collection":
     # variables
