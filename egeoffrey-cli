@@ -13,7 +13,7 @@ import filecmp
 ## constants
 BRANCH = "master"
 VERSION = 1.0
-REVISION = 23
+REVISION = 24
 MARKETPLACE_URL = "https://api.github.com/repos/egeoffrey/egeoffrey-marketplace/contents/marketplace"
 MARKETPLACE_BRANCH = "master"
 SDK_BRANCH = "master"
@@ -279,8 +279,8 @@ def run_docker(args):
     subprocess.call(["docker"] + args)
 
 # run git
-def run_git(args):
-    return subprocess.check_output(["git", "-C", MY_DIRECTORY] + args)
+def run_git(args, directory=MY_DIRECTORY):
+    return subprocess.check_output(["git", "-C", directory] + args)
     
 # read and return a (local) manifest file
 def read_manifest(manifest_file):
@@ -294,6 +294,15 @@ def read_manifest(manifest_file):
     if manifest["manifest_schema"] != SUPPORTED_MANIFEST_SCHEMA:
         print_error("manifest v"+str(manifest["manifest_schema"])+" is not supported")
     return manifest
+    
+# save a manifest file
+def save_manifest(manifest_file, manifest):
+    try: 
+        f = open(manifest_file, "w")
+        f.write(yaml.safe_dump(manifest, default_flow_style=False))
+        f.close()
+    except Exception,e:
+        print_error("Unable to save manifest file: "+str(e))
     
 # print usage
 def print_usage():
@@ -312,7 +321,7 @@ def print_usage():
     print_output("  upgrade                             Upgrade egeoffrey-cli to the latest version")
     print_output("  version                             Print out this script version")
     print_output("")
-    print_output("Run commands:")
+    print_output("User Commands:")
     print_output("  info <package>                      Print out information on a given package")
     print_output("  install <package(s)>                Install the provided package(s)")
     print_output("  list_available [<branch>]           List available packages that can be installed")
@@ -327,15 +336,19 @@ def print_usage():
     print_output("  update [<package(s)>]               Update the installed package(s)")
     print_output("  uninstall [<package(s)>]            Uninstall the provided package(s)")
     print_output("")
-    print_output("Build commands:")
-    print_output("  commit '<description>'              Commit changes to the local and remote git repository")
-    print_output("  commit_sdk '<description>'          Commit SDK changes to the local and remote git repository")
+    print_output("Developer Commands:")
     print_output("  build <amd64,arm>                   Build a docker image and push it upstream")
     print_output("  build_sdk <image> <amd64,arm>       Build a SDK docker image and push it upstream")
+    print_output("  commit '<description>'              Commit changes to the local and remote git repository")
+    print_output("  commit_sdk '<description>'          Commit SDK changes to the local and remote git repository")
+    print_output("  init_repo <type> <name> <git_user>  Create a local empty repository and set a remote upstream URL")
     print_output("  make_collection                     Create a collection including the configured packages")
+    print_output("  merge                               Merge the current branch into master")
+    print_output("  new_branch <branch_name>            Switch to a different branch")
+    print_output("  new_version <version>               Switch to a new version")
 
         
-## MAIN - RUN ##
+## MAIN - END-USER ##
 
 # parse provided command line
 parse_command_line()
@@ -425,8 +438,7 @@ elif COMMAND == "install":
                     split = device.split(":")
                     print_output("Please ensure the mapped device "+split[0]+" exists")
             # the docker daemon will restart the service at boot time
-            # TODO: add restart = always
-            #service["restart"] = "always"
+            service["restart"] = "always"
             # add the new service
             CONFIG["services"][package_name] = service
         except Exception,e:
@@ -512,7 +524,7 @@ elif COMMAND == "uninstall":
     # save the updated configuration file
     save_configuration()
     
-## MAIN - BUILD ##
+## MAIN - DEVELOPER ##
 
 # commit changes to a git repository and push upstream
 elif COMMAND == "commit" or COMMAND == "commit_sdk":
@@ -522,12 +534,12 @@ elif COMMAND == "commit" or COMMAND == "commit_sdk":
     if COMMAND == "commit_sdk": manifest_file = MY_DIRECTORY+"/sdk/manifest.yml"
     manifest = read_manifest(manifest_file)
     # ensure we are in the same branch of the manifest
-    output = run_git(["branch"])
-    branch = None
-    for line in output.split("\n"):
-        if line.startswith("* "): branch = line.replace("* ","")
-    if branch is None: print_error("unable to determine current branch of "+MY_DIRECTORY)
-    if branch != manifest["branch"]: print_error(MY_DIRECTORY+" current branch does not match with the manifest's branch")
+    # output = run_git(["branch"])
+    # branch = None
+    # for line in output.split("\n"):
+    #     if line.startswith("* "): branch = line.replace("* ","")
+    # if branch is None: print_error("unable to determine current branch of "+MY_DIRECTORY)
+    # if branch != manifest["branch"]: print_error(MY_DIRECTORY+" current branch does not match with the manifest's branch")
     if "nothing to commit" not in run_git(["status"]) or FORCE:
         # ask the user before proceeding
         if not QUITE:
@@ -537,18 +549,8 @@ elif COMMAND == "commit" or COMMAND == "commit_sdk":
             raw_input("Do you want to proceed committing these changes?")
         # increase revision number
         manifest["revision"] = manifest["revision"]+1
-        # convert the manifest back to YAML
-        try:
-            content = yaml.safe_dump(manifest, default_flow_style=False)
-        except Exception,e:
-            print_error("unable to edit the manifest file: "+str(e))
-        # save the updated manifest
-        try:
-            f = open(manifest_file, "w")
-            f.write(content)
-            f.close()
-        except Exception,e:
-            print_error("unable to write the manifest file: "+str(e))
+        # save the manifest
+        save_manifest(manifest_file, manifest)
         print_output("Setting new version for "+manifest["package"]+" to "+str(manifest["version"])+"-"+str(manifest["revision"])+" ("+str(manifest["branch"])+")")
         # generate a README.md file
         if COMMAND != "commit_sdk":
@@ -671,6 +673,175 @@ elif COMMAND == "build" or  COMMAND == "build_sdk":
             if manifest["branch"] == "master": 
                 run_docker(["push", image_version])
             
+# initialize an emtpy repository and set remote url
+elif COMMAND == "init_repo":
+    ARGUMENTS = ARGUMENTS.split(" ")
+    if len(ARGUMENTS) != 3: print_error("provide a type, a name for the directory and a remote url")
+    type = ARGUMENTS[0]
+    name = ARGUMENTS[1]
+    github_user = ARGUMENTS[2]
+    if type not in ["interaction", "notification", "service"]: print_error("type must be one of interaction, notification, service")
+    package = "egeoffrey-"+type+"-"+name
+    module = type+"/"+name
+    package_remote_path = github_user+"/"+package
+    print_output("Creating directory structure in "+package)
+    # create the directory structure
+    if os.path.isdir(package):
+        print_error("directory "+package+" already exists")
+    run("mkdir -p "+package)
+    run("mkdir -p "+package+"/default_config")
+    run("mkdir -p "+package+"/"+type)
+    # create .dockerfile
+    try: 
+        dockerignore = """.DS_Store 
+.git
+.git/
+*.autosave 
+*.save
+*~
+*.pyc
+sdk
+sdk/"""
+        f = open(package+"/.dockerignore", "w")
+        f.write(dockerignore)
+        f.close()
+    except Exception,e:
+        print_error("Unable to create .dockerignore: "+str(e))
+    # create .gitignore
+    try: 
+        gitignore = """.DS_Store 
+*.autosave 
+*.save
+*~
+*.pyc
+sdk"""
+        f = open(package+"/.gitignore", "w")
+        f.write(gitignore)
+        f.close()
+    except Exception,e:
+        print_error("Unable to create .gitignore: "+str(e))
+    # create Dockerfile
+    try: 
+        dockerfile = """### EGEOFFREY ###
+
+### define base image
+## the SDK version to bind to has to be passed by the builder so to select the right base image
+ARG SDK_VERSION
+ARG ARCHITECTURE
+## Use the small alpine image if you don't have OS dependencies
+FROM egeoffrey/egeoffrey-sdk-alpine:${SDK_VERSION}-${ARCHITECTURE}
+## Use the raspian image if you have OS dependencies
+#FROM egeoffrey/egeoffrey-sdk-raspbian:${SDK_VERSION}-${ARCHITECTURE}
+
+### install your module's dependencies
+## python dependencies
+#RUN pip install <package>
+## OS dependencies (for alpine-based images)
+#RUN apk update && apk add <package> && rm -rf /var/cache/apk/*
+## OS dependencies (for raspbian/debian images)
+#RUN echo 'debconf debconf/frontend select Noninteractive' | debconf-set-selections && apt-get update && apt-get install -y <package> && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+### copy files into the image
+COPY . $WORKDIR"""
+        f = open(package+"/Dockerfile", "w")
+        f.write(dockerfile)
+        f.close()
+    except Exception,e:
+        print_error("Unable to create Dockerfile: "+str(e))
+    # create the manifest
+    manifest = {
+        "branch": "master",
+        "description": "Description of the package",
+        "dockerhub": package_remote_path,
+        "github": package_remote_path,
+        "icon": "box-open",
+        "manifest_schema": 2,
+        "package": package,
+        "revision": 0,
+        "tags": type,
+        "version": 1.0
+    }
+    module_desc = {}
+    module_desc[module] = {}
+    module_desc[module]["description"] = "Description of the module"
+    manifest["modules"] = []
+    manifest["modules"].append(module_desc)
+    save_manifest(package+"/manifest.yml", manifest)
+    # create the module file
+    try: 
+        f = open(package+"/"+type+"/__init__.py", "w")
+        f.write("")
+        f.close()
+    except Exception,e:
+        print_error("Unable to create __init__.py file: "+str(e))
+    try: 
+        code = """### """+module+""": description of the module
+## HOW IT WORKS: 
+## DEPENDENCIES:
+# OS: 
+# Python: 
+## CONFIGURATION:
+# required: 
+# optional: 
+## COMMUNICATION:
+# INBOUND: 
+# - IN: 
+#   required: 
+#   optional: 
+# OUTBOUND: 
+
+from sdk.python.module."""+type+""" import """+type.capitalize()+"""
+
+class """+name.capitalize()+"""("""+type.capitalize()+"""):
+    # What to do when initializing
+    def on_init(self):
+        pass
+        
+    # What to do when running
+    def on_start(self):
+        pass
+
+    # What to do when shutting down
+    def on_stop(self):
+        pass
+
+    # What to do when receiving a request for this module
+    def on_message(self, message):
+        pass
+
+            """
+        if type == "notification":
+            code = code+"""
+    #What to do when ask to notify
+    def on_notify(self, severity, text):
+        pass
+                """
+        if type == "service": 
+            code = code +"""
+    # What to do when receiving a new/updated configuration for this module    
+    def on_configuration(self,message):
+        # register/unregister the sensor
+        if message.args.startswith("sensors/"):
+            if message.is_null: 
+                sensor_id = self.unregister_sensor(message)
+            else: 
+                sensor_id = self.register_sensor(message)
+                """
+        else:
+            code = code +"""
+    # What to do when receiving a new/updated configuration for this module
+    def on_configuration(self, message):
+        pass"""
+        f = open(package+"/"+type+"/"+name+".py", "w")
+        f.write(code)
+        f.close()
+    except Exception,e:
+        print_error("Unable to create "+name+".py file: "+str(e))
+    # initialize the git repository
+    print_output("Initializing git repostiory and setting remote to https://github.com/"+github_user+"/"+package+".git")
+    run_git(["init"], package)
+    run_git(["remote", "add", "origin", "https://github.com/"+github_user+"/"+package+".git"], package)
+
 # make a collection using the files provided in the collection directory
 elif COMMAND == "make_collection":
     # variables
@@ -698,17 +869,9 @@ elif COMMAND == "make_collection":
     # read - if exists - the existing manifest
     old_manifest = None
     if os.path.exists(MY_DIRECTORY+"/manifest.yml"):
-        try:
-            with open(MY_DIRECTORY+"/manifest.yml") as f: content = f.read()
-            old_manifest = yaml.load(content, Loader=yaml.SafeLoader)
-        except Exception,e:
-            print_error("Unable to read manifest file: "+str(e))
+        old_manifest = read_manifest(MY_DIRECTORY+"/manifest.yml")
     # read the collection manifest file
-    try:
-        with open(collection_dir+"/manifest.yml") as f: content = f.read()
-        manifest_collection = yaml.load(content, Loader=yaml.SafeLoader)
-    except Exception,e:
-        print_error("Unable to read collection manifest: "+str(e))
+    manifest_collection = read_manifest(collection_dir+"/manifest.yml")
     # parse the provided list of packages to add
     packages = []
     try:
@@ -733,18 +896,14 @@ elif COMMAND == "make_collection":
         package_tmp_dir = tmp_dir+"/"+package_name
         package_url = "https://github.com/"+repo+"/archive/"+branch+".tar.gz"
         print_debug("Downloading "+package_url+"...")
-        run("wget "+package_url+" -O "+package_tar_file)
+        run("wget --no-check-certificate "+package_url+" -O "+package_tar_file)
         # extract the package's content
         print_debug("Extracting "+package_tar_file+"...")
         run("mkdir "+package_tmp_dir)
         run("tar zxfv "+package_tar_file+" --strip-components=1 -C "+package_tmp_dir)
         # read the package's manifest
         manifest_file = package_tmp_dir+"/manifest.yml"
-        try:
-            with open(manifest_file) as f: content = f.read()
-            manifest = yaml.load(content, Loader=yaml.SafeLoader)
-        except Exception,e:
-            print_error("Unable to load manifest of "+package_name+": "+str(e))
+        manifest = read_manifest(package_tmp_dir+"/manifest.yml")
         run("cp -f "+manifest_file+" "+build_dir+"/manifests/manifest_"+manifest["package"]+".yml")
         # update the collection manifest file by merging the package's modules
         for module_object in manifest["modules"]:
@@ -884,12 +1043,7 @@ elif COMMAND == "make_collection":
     if old_manifest is not None:
         manifest_collection["revision"] = old_manifest["revision"]
     # build and save the collection manifest file
-    try: 
-        f = open(build_dir+"/manifest.yml", "w")
-        f.write(yaml.safe_dump(manifest_collection, default_flow_style=False))
-        f.close()
-    except Exception,e:
-        print_error("Unable to save collection manifest file: "+str(e))
+    save_manifest(build_dir+"/manifest.yml", manifest_collection)
     # for each file of the build directory check if needs to be moved into the main directory
     created = 0
     updated = 0
@@ -933,6 +1087,65 @@ elif COMMAND == "make_collection":
     # clean up
     run("rm -rf "+tmp_dir)
     run("rm -rf "+build_dir)
+    
+# merge the current branch into master
+elif COMMAND == "merge":
+    # get the current branch
+    output = run_git(["branch"])
+    branch = None
+    for line in output.split("\n"):
+        if line.startswith("* "): branch = line.replace("* ","")
+    if branch is None: print_error("unable to determine current branch of "+MY_DIRECTORY)
+    if branch == "master":
+        print_error("Already on master branch")
+    print_output("Merging current branch "+branch+" into master")
+    # merge the current branch into master
+    run_git(["checkout", "master"])
+    run_git(["merge", branch, "--no-commit", "--no-ff"])
+    # read the current manifest
+    manifest = read_manifest(MY_DIRECTORY+"/manifest.yml")
+    # set the branch back to master and save
+    manifest["branch"] = "master"
+    save_manifest(MY_DIRECTORY+"/manifest.yml", manifest)
+    print_output("egeoffrey-cli commit has to be run to fully commit the changes")
+    
+# swtich to a new branch
+elif COMMAND == "new_branch":
+    if ARGUMENTS == "": print_error("provide the name of a branch")
+    branch = ARGUMENTS
+    print_output("Switching to branch "+branch)
+    # list local branches
+    output = run_git(["branch"])
+    branches = []
+    for line in output.split("\n"):
+        line = line.replace("*", "").rstrip().lstrip()
+        if line != "": branches.append(line)
+    # delete the local branch if exists
+    if branch in branches:
+        run_git(["branch", "-D", branch])
+        # delete the remote branch
+        if not OFFLINE: run_git(["push", "origin", "--delete", branch])
+    # update manifest file
+    manifest = read_manifest(MY_DIRECTORY+"/manifest.yml")
+    if manifest["branch"] == branch:
+        print_error("Already on branch "+branch)
+    manifest["branch"] = branch
+    save_manifest(MY_DIRECTORY+"/manifest.yml", manifest)
+    # checkout on new branch
+    run_git(["checkout", "-b", branch])
+    
+# swtich to a new version
+elif COMMAND == "new_version":
+    if ARGUMENTS == "": print_error("provide the new version")
+    version = ARGUMENTS
+    print_output("Switching to version v"+version)
+    # update manifest file
+    manifest = read_manifest(MY_DIRECTORY+"/manifest.yml")
+    if manifest["version"] == version:
+        print_error("Already on version "+version)
+    manifest["version"] = float(version)
+    manifest["revision"] = 0
+    save_manifest(MY_DIRECTORY+"/manifest.yml", manifest)
     
 ## MAIN - GENERAL ##
 
