@@ -13,9 +13,9 @@ import filecmp
 ## constants
 BRANCH = "master"
 VERSION = 1.0
-REVISION = 25
-MARKETPLACE_URL = "https://api.github.com/repos/egeoffrey/egeoffrey-marketplace/contents/marketplace"
-MARKETPLACE_BRANCH = "master"
+REVISION = 26
+MARKETPLACE_URL = "https://marketplace.egeoffrey.com/cache/marketplace_cache.json"
+SUPPORTED_CACHE_SCHEMA = 1
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/version.yml"
 MY_DOWNLOAD_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/egeoffrey-cli"
 MY_DIRECTORY = os.getcwd()
@@ -108,7 +108,7 @@ def requires_upgrade():
     except Exception,e:
         print_error("Unable to download egeoffrey-cli manifest: "+str(e))
     # check if we are at the latest version
-    print_debug("egeoffrey-cli latest release v"+str(manifest["revision"])+", currently running v"+str(REVISION))
+    print_debug("egeoffrey-cli latest release v"+str(manifest["version"])+"-"+str(manifest["revision"])+", currently running v"+str(VERSION)+"-"+str(REVISION))
     if manifest["version"] > VERSION or (manifest["version"] == VERSION and manifest["revision"] > REVISION): return str(manifest["version"])+"-"+str(manifest["revision"])
     return None
     
@@ -132,50 +132,6 @@ def load_env():
         print_error("unable to read environment file from "+env_file+": "+str(e))
     print_debug("Loaded "+str(len(ENV))+" env settings")
 
-# download and return a manifest from a remote git repository
-def get_manifest(package, repository, branch):
-    print_debug("Loading manifest file for package "+package+":"+branch)
-    try:
-        manifest_url = "https://raw.githubusercontent.com/"+repository+"/"+branch+"/manifest.yml?timestamp="+str(int(time.time()))
-        response = requests.get(manifest_url)
-        if response.status_code != 200: 
-            print_warning("skipping package "+package+":"+branch)
-            return None
-        return yaml.load(response.content, Loader=yaml.SafeLoader)
-    except Exception,e:
-        print_warning("skipping package "+package+":"+branch+": "+str(e))
-        return None    
-
-# return an array of registered packages in the marketplace
-def list_marketplace():
-    index = []
-    print_debug("Listing Marketplace items...")
-    try:
-        # list all files in the marketplace database
-        response = requests.get(MARKETPLACE_URL+"?ref="+MARKETPLACE_BRANCH)
-        if response.status_code != 200: print_error("Unable to list marketplace items")
-        content = json.loads(response.content)
-        # for each package in the marketplace
-        for entry in content:
-            if "path" not in entry or "name" not in entry: continue
-            index.append(entry["name"].replace(".yml", ""))
-        print_debug("Marketplace has "+str(len(content))+" entries")
-        return index
-    except Exception,e:
-        print_error("Unable to list marketplace items: "+str(e))
-
-# return the github repo of a marketplace package 
-def get_repository(package):
-    try: 
-        # download from the marketplace the file for the package
-        response = requests.get("https://raw.githubusercontent.com/egeoffrey/egeoffrey-marketplace/"+MARKETPLACE_BRANCH+"/marketplace/"+package+".yml?timestamp="+str(int(time.time())))
-        if response.status_code != 200: print_error("Unable to retrieve github repository for package "+package)
-        content = yaml.load(response.content, Loader=yaml.SafeLoader)
-        if "github" not in content: return None
-        return content["github"]
-    except Exception,e:
-        print_error("Unable to retrieve github repository for package "+package+": "+str(e))
-        
 # parse a package splitting the package name from the branch
 def parse_package(string):
     package = string
@@ -184,43 +140,22 @@ def parse_package(string):
     return package, branch        
     
 # build the marketplace database
-def get_marketplace(requested_packages=None, package_branch="master"):
+def get_marketplace():
     global ENV
     marketplace = {}
-    # get the list of all items in the marketplace
-    marketplace_index = list_marketplace()
     try:
-        # for each package in the marketplace
-        for i in range(0, len(marketplace_index)):
-            marketplace_package = marketplace_index[i]
-            # no specific package requested, tell the user we need to download the entire marketplace
-            if requested_packages is None:
-                msg = "Downloading marketplace database: "+str( (i+1)*100/len(marketplace_index) )+"%"
-                sys.stdout.write('\r')
-                sys.stdout.write(msg)
-                sys.stdout.flush()
-                if i == len(marketplace_index)-1: sys.stdout.write('\n')
-            # if specific packages are requested, filter out unwanted packages
-            if requested_packages is not None:
-                include_package = False
-                for package in requested_packages:
-                    package_name, package_branch = parse_package(package)
-                    if package_name == marketplace_package: include_package = True
-                if not include_package: continue
-            # download the marketplace item which contains the github repo reference
-            repository = get_repository(marketplace_package)
-            if repository is None: continue
-            # download the manifest from the remote repository
-            manifest = get_manifest(marketplace_package, repository, package_branch)
-            if manifest is None: continue
-            if manifest["manifest_schema"] != SUPPORTED_MANIFEST_SCHEMA:
-                print_warning("Skipping package "+marketplace_package+" because manifest v"+str(manifest["manifest_schema"])+" is not supported")
-                continue
-            # populate the marketplace
-            marketplace[marketplace_package] = manifest
+        # download the marketplace database
+        print_debug("Downloading marketplace database from "+MARKETPLACE_URL)
+        response = requests.get(MARKETPLACE_URL)
+        if response.status_code != 200: print_error("Unable to list marketplace items")
+        marketplace = json.loads(response.content)
+        if marketplace["schema_version"] != SUPPORTED_CACHE_SCHEMA:
+            raise Exception("Marketplace schema version "+str(marketplace["schema_version"])+" not supported")
+        print_debug("Marketplace has "+str(len(marketplace["packages"]))+" entries, last updated on "+marketplace["last_update_string"])
         return marketplace
     except Exception,e:
-        print_error("Unable to build marketplace index: "+str(e))
+        print_error("Unable to list marketplace items: "+str(e))
+    sys.stdout.flush()
         
 # load docker-compose configuration
 def load_configuration():
@@ -362,13 +297,16 @@ if not OFFLINE and COMMAND != "upgrade":
 if COMMAND == "info":
     package = ARGUMENTS
     if package == "": print_error("a package name must be provided")
-    marketplace = get_marketplace([package])
+    marketplace = get_marketplace()
     package_name, package_branch = parse_package(package)
-    if package_name not in marketplace: print_error("package "+package+" not found")
-    manifest = marketplace[package_name]
+    if package_name not in marketplace["packages"]: 
+        print_error("package "+package+" not found")
+    manifest = marketplace["packages"][package_name]["branches"][package_branch]["manifest"]
     print_output("Package: "+manifest["package"])
+    print_output("Created: "+marketplace["packages"][package_name]["info"]["created_string"])
     print_output("Tags: "+manifest["tags"])
     print_output("Version: "+str(manifest["version"])+"-"+str(manifest["revision"])+" ("+str(manifest["branch"])+")")
+    print_output("Last Updated: "+marketplace["packages"][package_name]["branches"][package_branch]["info"]["updated_string"])
     print_output("Github: https://github.com/"+manifest["github"])
     print_output("Docker: "+manifest["dockerhub"])
     modules = []
@@ -385,7 +323,7 @@ elif COMMAND == "install":
     load_configuration()
     packages = ARGUMENTS.split(" ")
     if len(packages) == 0: print_error("at least a package name must be provided")
-    marketplace = get_marketplace(packages)
+    marketplace = get_marketplace()
     for package in packages:
         package_name, package_branch = parse_package(package)
         # ensure package is not already installed
@@ -393,13 +331,13 @@ elif COMMAND == "install":
             print_output(package_name+" is already installed")
             continue
         # ensure package exists in the marketplace
-        if package_name not in marketplace:
+        if package_name not in marketplace["packages"]:
             print_output(package_name+" not found in the marketplace, skipping")
             continue
         # add the package to the docker-compose file
         try:
             service = {}
-            manifest =  marketplace[package_name]
+            manifest = marketplace["packages"][package_name]["branches"][package_branch]["manifest"]
             print_debug("Installing package "+package_name+":"+package_branch)
             # if runtime parameters are provided, merge them with the service
             if "container_config" in manifest: 
@@ -450,11 +388,11 @@ elif COMMAND == "install":
 elif COMMAND == "list_available":
     load_configuration()
     branch = ARGUMENTS if ARGUMENTS != "" else "master"
-    marketplace = get_marketplace(None, branch)
-    for package in sorted(marketplace):
+    marketplace = get_marketplace()
+    for package in sorted(marketplace["packages"]):
         # skip already installed packages
         if package in CONFIG["services"]: continue
-        print_output(package+": "+marketplace[package]["description"])
+        print_output(package+": "+marketplace["packages"][package]["branches"][branch]["manifest"]["description"])
 
 # list packages already installed
 elif COMMAND == "list_installed":
@@ -478,11 +416,12 @@ elif COMMAND == "search":
     branch = "master"
     if len(search) == 2: branch = search[1]
     load_configuration()
-    marketplace = get_marketplace(None, branch)
+    marketplace = get_marketplace()
     words = search[0].split(" ")
-    for package in sorted(marketplace):
-        if len(list(set(words) & set(marketplace[package]["description"].split(" ")))) > 0 or len(list(set(words) & set(marketplace[package]["tags"].split(" ")))) > 0:
-            print_output(package+": "+marketplace[package]["description"])
+    for package in sorted(marketplace["packages"]):
+        manifest = marketplace["packages"][package]["branches"][branch]["manifest"]
+        if len(list(set(words) & set(manifest["description"].split(" ")))) > 0 or len(list(set(words) & set(manifest["tags"].split(" ")))) > 0:
+            print_output(package+": "+manifest["description"])
             
 # start services
 elif COMMAND == "start":
