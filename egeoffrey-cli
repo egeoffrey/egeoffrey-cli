@@ -13,7 +13,7 @@ import filecmp
 ## constants
 BRANCH = "master"
 VERSION = 1.0
-REVISION = 26
+REVISION = 27
 MARKETPLACE_URL = "https://marketplace.egeoffrey.com/cache/marketplace_cache.json"
 SUPPORTED_CACHE_SCHEMA = 1
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/version.yml"
@@ -131,6 +131,19 @@ def load_env():
     except Exception,e: 
         print_error("unable to read environment file from "+env_file+": "+str(e))
     print_debug("Loaded "+str(len(ENV))+" env settings")
+    
+# save .env file with common docker-compose environment variables
+def save_env():
+    global ENV
+    env_file = MY_DIRECTORY+"/.env"
+    print_debug("Saving .env file to "+env_file)
+    try: 
+        f = open(env_file, "w")
+        for env in sorted(ENV):
+            f.write(env+"="+str(ENV[env])+"\n")
+        f.close()
+    except Exception,e:
+        print_error("Unable to save eGeoffrey environment file: "+str(e))
 
 # parse a package splitting the package name from the branch
 def parse_package(string):
@@ -163,24 +176,12 @@ def load_configuration():
     docker_compose_file = MY_DIRECTORY+"/"+DOCKER_COMPOSE
     # load docker-compose common variables
     load_env()
-    # if docker-compose file does not exist, make an empty version
-    if not os.path.isfile(docker_compose_file): 
-        CONFIG = {
-            "version": "3",
-            "services": {},
-            "networks": {
-                "egeoffrey": {
-                    "driver": "bridge"
-                }
-            }
-        }
-    else:
-        print_debug("Loading docker-compose configuration from "+docker_compose_file)
-        try:
-            with open(docker_compose_file) as f: content = f.read()
-            CONFIG = yaml.load(content, Loader=yaml.SafeLoader)
-        except Exception,e:
-            print_error("Unable to load eGeoffrey docker configuration: "+str(e))
+    print_debug("Loading docker-compose configuration from "+docker_compose_file)
+    try:
+        with open(docker_compose_file) as f: content = f.read()
+        CONFIG = yaml.load(content, Loader=yaml.SafeLoader)
+    except Exception,e:
+        print_error("Unable to load eGeoffrey docker configuration: "+str(e))
         
 # save docker-compose configuration
 def save_configuration():
@@ -237,7 +238,41 @@ def save_manifest(manifest_file, manifest):
         f.close()
     except Exception,e:
         print_error("Unable to save manifest file: "+str(e))
-    
+
+# detect system architecture  
+def detect_architecture():
+    architecture = None
+    output = run("uname -m")
+    if "x86_64" in output: architecture = "amd64"
+    if "arm" in output: architecture = "arm32v6"
+    print_debug("Detected architecture: "+str(architecture))
+    return architecture
+ 
+# detect system timezone
+def detect_timezone():
+    timezone = None
+    output = run("cat /etc/timezone 2>/dev/null")
+    if output == "":
+        print_warning("Unable to detect timezone, using default")
+        timezone = "Europe/Paris"
+    else: 
+        timezone = output
+    print_debug("Detected timezone: "+str(timezone))
+    return timezone
+
+# request user input
+def request_input(question, validation, default=None):
+    regex = re.compile(validation, re.I)
+    while True:
+        user_input = raw_input(question+": ")
+        if default is not None and user_input == "": user_input = default
+        match = regex.match(str(user_input))
+        if bool(match):
+            break
+        else:
+            print_warning("The input provided '"+user_input+"' is not valid")
+    return user_input
+ 
 # print usage
 def print_usage():
     print_output("egeoffrey-cli v"+str(VERSION)+"-"+str(REVISION)+" ("+str(BRANCH)+")")
@@ -263,6 +298,7 @@ def print_usage():
     print_output("  logs [-f] [<package(s)>]            Print out log information")
     print_output("  reload                              Reload the configuration")
     print_output("  search <string> [branch]            Search packages matching the provided description")
+    print_output("  setup                               Initialize the installation directory and setup eGeoffrey")
     print_output("  start [<package(s)>]                Start configured services")
     print_output("  stats                               Print out running packages CPU and memory utilization")
     print_output("  status                              Show currently running components")
@@ -422,7 +458,51 @@ elif COMMAND == "search":
         manifest = marketplace["packages"][package]["branches"][branch]["manifest"]
         if len(list(set(words) & set(manifest["description"].split(" ")))) > 0 or len(list(set(words) & set(manifest["tags"].split(" ")))) > 0:
             print_output(package+": "+manifest["description"])
-            
+
+# initialize and setup eGeoffrey
+elif COMMAND == "setup":
+    # if docker-compose file does not exist, make and save an empty version
+    docker_compose_file = MY_DIRECTORY+"/"+DOCKER_COMPOSE
+    if not os.path.isfile(docker_compose_file): 
+        CONFIG = {
+            "version": "3",
+            "services": {},
+            "networks": {
+                "egeoffrey": {
+                    "driver": "bridge"
+                }
+            }
+        }
+        save_configuration()
+    # local gateway
+    ENV["EGEOFFREY_GATEWAY_HOSTNAME"] = "egeoffrey-gateway"
+    ENV["EGEOFFREY_GATEWAY_PORT"] = "443"
+    ENV["EGEOFFREY_GATEWAY_TRANSPORT"] = "websockets"
+    ENV["EGEOFFREY_GATEWAY_SSL"] = 0
+    # ask for house id
+    ENV["EGEOFFREY_ID"] = request_input("Which name you want to give your house? [house]", "^[a-zA-Z0-9-_]+$", "house")
+    ENV["EGEOFFREY_GUI_ID"] = ENV["EGEOFFREY_ID"]
+    # ask if connecting to a remote gateway
+    user_input = request_input("Do you want to connect this eGeoffrey instance to a remote gateway? (not needed for a standard, local installation) (y/n) [n]", "^[yn]$", "n")
+    if user_input == "y":
+        ENV["REMOTE_EGEOFFREY_ID"] = ENV["EGEOFFREY_ID"]
+        # remote gateway hostname
+        ENV["REMOTE_EGEOFFREY_GATEWAY_HOSTNAME"] = request_input("What is the hostname of your remote gateway? [gateway.egeoffrey.com]", "^.+$", "gateway.egeoffrey.com")
+        # remote gateway port
+        ENV["REMOTE_EGEOFFREY_GATEWAY_PORT"] = request_input("On which port the remote gateway is listening to? [8883]", "^\d+$", "8883")
+        # remote gateway ssl
+        user_input = request_input("Does the remote gateway enforce TLS/SSL? (y/n) [y]", "^[yn]$", "y")
+        ENV["REMOTE_EGEOFFREY_GATEWAY_SSL"] = 1 if user_input == "y" else 0
+        # remote house passcode
+        ENV["REMOTE_EGEOFFREY_PASSCODE"] = request_input("What is the password for connecting to the remote gateway?", ".+")
+    # other environment file
+    ENV["PYTHONUNBUFFERED"] = 1
+    ENV["TZ"] = detect_timezone()
+    ENV["ARCHITECTURE"] = detect_architecture()
+    # save the .env file
+    save_env()
+    print_output("Setup of the house '"+str(ENV["EGEOFFREY_ID"])+"' completed")
+    
 # start services
 elif COMMAND == "start":
     packages = ARGUMENTS.split(" ") if ARGUMENTS != "" else []
