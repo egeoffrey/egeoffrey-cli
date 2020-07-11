@@ -13,7 +13,7 @@ import filecmp
 ## constants
 BRANCH = "master"
 VERSION = 1.0
-REVISION = 27
+REVISION = 28
 MARKETPLACE_URL = "https://marketplace.egeoffrey.com/cache/marketplace_cache.json"
 SUPPORTED_CACHE_SCHEMA = 1
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/version.yml"
@@ -279,43 +279,45 @@ def print_usage():
     print_output("Usage: egeoffrey-cli [OPTIONS] COMMAND ARGUMENTS")
     print_output("")
     print_output("Options:")
-    print_output("  -d <directory>                      set the working directory")
-    print_output("  -c <filename>                       set custom docker-compose.yml filename")
-    print_output("  -v                                  enable DEBUG output")
-    print_output("  -q                                  quite mode - do not run interactively")
-    print_output("  -o                                  offline mode")
-    print_output("  -f                                  force an action")
+    print_output("  -d <directory>                       set the working directory")
+    print_output("  -c <filename>                        set custom docker-compose.yml filename")
+    print_output("  -v                                   enable DEBUG output")
+    print_output("  -q                                   quite mode - do not run interactively")
+    print_output("  -o                                   offline mode")
+    print_output("  -f                                   force an action")
     print_output("")
     print_output("General commands:")
-    print_output("  upgrade                             Upgrade egeoffrey-cli to the latest version")
-    print_output("  version                             Print out this script version")
+    print_output("  upgrade                              Upgrade egeoffrey-cli to the latest version")
+    print_output("  version                              Print out this script version")
     print_output("")
     print_output("User Commands:")
-    print_output("  info <package>                      Print out information on a given package")
-    print_output("  install <package(s)>                Install the provided package(s)")
-    print_output("  list_available [<branch>]           List available packages that can be installed")
-    print_output("  list_installed                      List already installed packages")
-    print_output("  logs [-f] [<package(s)>]            Print out log information")
-    print_output("  reload                              Reload the configuration")
-    print_output("  search <string> [branch]            Search packages matching the provided description")
-    print_output("  setup                               Initialize the installation directory and setup eGeoffrey")
-    print_output("  start [<package(s)>]                Start configured services")
-    print_output("  stats                               Print out running packages CPU and memory utilization")
-    print_output("  status                              Show currently running components")
-    print_output("  stop                                Stop running services")
-    print_output("  update [<package(s)>]               Update the installed package(s)")
-    print_output("  uninstall [<package(s)>]            Uninstall the provided package(s)")
+    print_output("  info <package>                       Print out information on a given package")
+    print_output("  install <package(s)>                 Install the provided package(s)")
+    print_output("  list_available [<branch>]            List available packages that can be installed")
+    print_output("  list_installed                       List already installed packages")
+    print_output("  logs [<package(s)>]                  Print out log information")
+    print_output("  logs_tail [<package(s)>]             Print out log information and tail the log file")
+    print_output("  reload                               Reload the configuration")
+    print_output("  search <string> [branch]             Search packages matching the provided description")
+    print_output("  set_modules <package_name> <modules> Reconfigure an installed package with the provided list of modules")
+    print_output("  setup                                Initialize the installation directory and setup eGeoffrey")
+    print_output("  start [<package(s)>]                 Start configured services")
+    print_output("  stats                                Print out running packages CPU and memory utilization")
+    print_output("  status                               Show currently running components")
+    print_output("  stop                                 Stop running services")
+    print_output("  update [<package(s)>]                Update the installed package(s)")
+    print_output("  uninstall [<package(s)>]             Uninstall the provided package(s)")
     print_output("")
     print_output("Developer Commands:")
-    print_output("  build [<architectures>]             Build a docker image and push it upstream")
-    print_output("  build_sdk <image> [<architectures>] Build a SDK docker image and push it upstream")
-    print_output("  commit '<description>'              Commit changes to the local and remote git repository")
-    print_output("  commit_sdk '<description>'          Commit SDK changes to the local and remote git repository")
-    print_output("  init_repo <type> <name> <git_user>  Create a local empty repository and set a remote upstream URL")
-    print_output("  make_collection                     Create a collection including the configured packages")
-    print_output("  merge                               Merge the current branch into master")
-    print_output("  new_branch <branch_name>            Switch to a different branch")
-    print_output("  new_version <version>               Switch to a new version")
+    print_output("  build [<architectures>]              Build a docker image and push it upstream")
+    print_output("  build_sdk <image> [<architectures>]  Build a SDK docker image and push it upstream")
+    print_output("  commit '<description>'               Commit changes to the local and remote git repository")
+    print_output("  commit_sdk '<description>'           Commit SDK changes to the local and remote git repository")
+    print_output("  init_repo <type> <name> <git_user>   Create a local empty repository and set a remote upstream URL")
+    print_output("  make_collection                      Create a collection including the configured packages")
+    print_output("  merge                                Merge the current branch into master")
+    print_output("  new_branch <branch_name>             Switch to a different branch")
+    print_output("  new_version <version>                Switch to a new version")
 
         
 ## MAIN - END-USER ##
@@ -433,13 +435,30 @@ elif COMMAND == "list_available":
 # list packages already installed
 elif COMMAND == "list_installed":
     load_configuration()
-    for service in sorted(CONFIG["services"]):
-        print_output(service)
+    for package in sorted(CONFIG["services"]):
+        branch = "master"
+        if ":" in CONFIG["services"][package]["image"]:
+            split = CONFIG["services"][package]["image"].split(":")
+            if "-" in split[1]:
+                split = split[1].split("-")
+                if split[0] != "master":
+                    branch = split[0]
+        package_name = package if branch == "master" else package+" ("+branch+")"
+        print_output(package_name)
+        service = CONFIG["services"][package]
+        if "environment" in service:
+            for env in service["environment"]:
+                if "EGEOFFREY_MODULES" in env:
+                    modules = env.split("=", 1)[1].split(",")
+                    for module in modules:
+                        print_output("\t- "+module.replace(" ",""))
         
 # run docker logs
-elif COMMAND == "logs":
+elif COMMAND == "logs" or COMMAND == "logs_tail":
     options = ARGUMENTS.split(" ") if ARGUMENTS != "" else []
-    run_docker_compose(["logs"]+options)
+    command = ["logs"]
+    if COMMAND == "logs_tail": command.append("-f")
+    run_docker_compose(command+options)
     
 # reload the configuration
 elif COMMAND == "reload":
@@ -458,6 +477,26 @@ elif COMMAND == "search":
         manifest = marketplace["packages"][package]["branches"][branch]["manifest"]
         if len(list(set(words) & set(manifest["description"].split(" ")))) > 0 or len(list(set(words) & set(manifest["tags"].split(" ")))) > 0:
             print_output(package+": "+manifest["description"])
+
+# set modules to a package
+elif COMMAND == "set_modules":
+    load_configuration()
+    arguments = ARGUMENTS.split(" ")
+    if len(arguments) != 2: print_error("a package and a list of modules must be provided")
+    package = arguments[0]
+    modules = arguments[1]
+    if package not in CONFIG["services"]:
+        print_error("package "+package+" is not installed")
+    if "environment" not in CONFIG["services"][package]:
+        CONFIG["services"][package]["environment"] = []
+    found = False
+    for i in range(0, len(CONFIG["services"][package]["environment"])):
+        if "EGEOFFREY_MODULES" in CONFIG["services"][package]["environment"][i]:
+            CONFIG["services"][package]["environment"][i] = "EGEOFFREY_MODULES="+modules
+            found = True
+    if not found: CONFIG["services"][package]["environment"].append("EGEOFFREY_MODULES="+modules)
+    print_output("Set to package "+package+" the following modules: "+modules)
+    save_configuration()
 
 # initialize and setup eGeoffrey
 elif COMMAND == "setup":
