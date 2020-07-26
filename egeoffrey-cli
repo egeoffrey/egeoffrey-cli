@@ -9,11 +9,12 @@ import yaml
 import subprocess
 import requests
 import filecmp
+import socket
 
 ## constants
 BRANCH = "master"
 VERSION = 1.0
-REVISION = 28
+REVISION = 29
 MARKETPLACE_URL = "https://marketplace.egeoffrey.com/cache/marketplace_cache.json"
 SUPPORTED_CACHE_SCHEMA = 1
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/version.yml"
@@ -253,12 +254,24 @@ def detect_timezone():
     timezone = None
     output = run("cat /etc/timezone 2>/dev/null")
     if output == "":
-        print_warning("Unable to detect timezone, using default")
+        print_debug("Unable to detect timezone, using default")
         timezone = "Europe/Paris"
     else: 
         timezone = output
     print_debug("Detected timezone: "+str(timezone))
     return timezone
+    
+# get the local IP address
+def detect_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('10.255.255.255', 1))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = '127.0.0.1'
+    finally:
+        s.close()
+    return ip
 
 # request user input
 def request_input(question, validation, default=None):
@@ -305,6 +318,7 @@ def print_usage():
     print_output("  stats                                Print out running packages CPU and memory utilization")
     print_output("  status                               Show currently running components")
     print_output("  stop                                 Stop running services")
+    print_output("  summary                              Summarize information regarding the current setup")
     print_output("  update [<package(s)>]                Update the installed package(s)")
     print_output("  uninstall [<package(s)>]             Uninstall the provided package(s)")
     print_output("")
@@ -449,9 +463,7 @@ elif COMMAND == "list_installed":
         if "environment" in service:
             for env in service["environment"]:
                 if "EGEOFFREY_MODULES" in env:
-                    modules = env.split("=", 1)[1].split(",")
-                    for module in modules:
-                        print_output("\t- "+module.replace(" ",""))
+                    print_output("  - Modules: "+env.split("=", 1)[1])
         
 # run docker logs
 elif COMMAND == "logs" or COMMAND == "logs_tail":
@@ -501,6 +513,8 @@ elif COMMAND == "set_modules":
 # initialize and setup eGeoffrey
 elif COMMAND == "setup":
     # if docker-compose file does not exist, make and save an empty version
+    print_output("eGeoffrey Setup")
+    print_output("===============")
     docker_compose_file = MY_DIRECTORY+"/"+DOCKER_COMPOSE
     if not os.path.isfile(docker_compose_file): 
         CONFIG = {
@@ -518,29 +532,27 @@ elif COMMAND == "setup":
     ENV["EGEOFFREY_GATEWAY_PORT"] = "443"
     ENV["EGEOFFREY_GATEWAY_TRANSPORT"] = "websockets"
     ENV["EGEOFFREY_GATEWAY_SSL"] = 0
-    # ask for house id
-    ENV["EGEOFFREY_ID"] = request_input("Which name you want to give your house? [house]", "^[a-zA-Z0-9-_]+$", "house")
-    ENV["EGEOFFREY_GUI_ID"] = ENV["EGEOFFREY_ID"]
-    # ask if connecting to a remote gateway
-    user_input = request_input("Do you want to connect this eGeoffrey instance to a remote gateway? (not needed for a standard, local installation) (y/n) [n]", "^[yn]$", "n")
+    # ask if connecting to the cloud gateway
+    user_input = request_input("- Do you want to access your eGeoffrey instance remotely, from outside your local network? (requires a user account on https://www.egeoffrey.com) (y/n) [n]", "^[yn]$", "n")
     if user_input == "y":
+        ENV["EGEOFFREY_ID"] = request_input("- What is your eGeoffrey username or email address?", "^[a-zA-Z0-9-_\.]+@[a-zA-Z0-9-_\.]+\.[a-zA-Z]+$")
+        ENV["EGEOFFREY_GUI_ID"] = ENV["EGEOFFREY_ID"]
         ENV["REMOTE_EGEOFFREY_ID"] = ENV["EGEOFFREY_ID"]
-        # remote gateway hostname
-        ENV["REMOTE_EGEOFFREY_GATEWAY_HOSTNAME"] = request_input("What is the hostname of your remote gateway? [gateway.egeoffrey.com]", "^.+$", "gateway.egeoffrey.com")
-        # remote gateway port
-        ENV["REMOTE_EGEOFFREY_GATEWAY_PORT"] = request_input("On which port the remote gateway is listening to? [8883]", "^\d+$", "8883")
-        # remote gateway ssl
-        user_input = request_input("Does the remote gateway enforce TLS/SSL? (y/n) [y]", "^[yn]$", "y")
-        ENV["REMOTE_EGEOFFREY_GATEWAY_SSL"] = 1 if user_input == "y" else 0
-        # remote house passcode
-        ENV["REMOTE_EGEOFFREY_PASSCODE"] = request_input("What is the password for connecting to the remote gateway?", ".+")
+        ENV["REMOTE_EGEOFFREY_GATEWAY_HOSTNAME"] = "gateway.egeoffrey.com"
+        ENV["REMOTE_EGEOFFREY_GATEWAY_PORT"] = 8883
+        ENV["REMOTE_EGEOFFREY_GATEWAY_SSL"] = 1
+        ENV["REMOTE_EGEOFFREY_PASSCODE"] = request_input("- What is the password of your eGeoffrey account?", ".+")
+    else:
+        ENV["EGEOFFREY_ID"] = "house"
     # other environment file
     ENV["PYTHONUNBUFFERED"] = 1
     ENV["TZ"] = detect_timezone()
     ENV["ARCHITECTURE"] = detect_architecture()
     # save the .env file
     save_env()
-    print_output("Setup of the house '"+str(ENV["EGEOFFREY_ID"])+"' completed")
+    print_output("")
+    print_output("The setup of your house in eGeoffrey is now complete!")
+    print_output("If you need to change any of the information just provided, run 'sudo egeoffrey-cli setup'")
     
 # start services
 elif COMMAND == "start":
@@ -559,6 +571,46 @@ elif COMMAND == "status":
 elif COMMAND == "stop":
     run_docker_compose(["down"])
     
+# summary of the configuration
+elif COMMAND == "summary":
+    load_configuration()
+    local_ip = detect_ip()
+    print_output("How to access your eGeoffrey")
+    print_output("============================")
+    print_output("Web Interface URL: http://"+local_ip)
+    print_output("Login information:")
+    print_output("  - Gateway:")
+    hostname = local_ip if "EGEOFFREY_GATEWAY_HOSTNAME" not in ENV or ENV["EGEOFFREY_GATEWAY_HOSTNAME"] == "egeoffrey-gateway" else ENV["EGEOFFREY_GATEWAY_HOSTNAME"]
+    print_output("    - Hostname: "+hostname)
+    port = str(ENV["EGEOFFREY_GATEWAY_PORT"]) if "EGEOFFREY_GATEWAY_PORT" in ENV else "443"
+    print_output("    - Port: "+port)
+    ssl = "yes" if "EGEOFFREY_GATEWAY_SSL" in ENV and ENV["EGEOFFREY_GATEWAY_SSL"] == 1 else "no"
+    print_output("    - Use SSL: "+ssl)
+    print_output("  - House:")
+    house_id = ENV["EGEOFFREY_ID"] if "EGEOFFREY_ID" in ENV else "house"
+    print_output("    - House ID: "+house_id)
+    passcode = ENV["EGEOFFREY_PASSCODE"] if "EGEOFFREY_PASSCODE" in ENV else "<empty>"
+    print_output("    - Passcode: "+passcode)
+    print_output("  - User:")
+    print_output("    - Username: your configured user or the default admin/admin and guest/<empty>")
+    print_output("    - Password: your configured user or the default admin/admin and guest/<empty>")
+    if "REMOTE_EGEOFFREY_GATEWAY_HOSTNAME" in ENV:
+        print_output("")
+        print_output("Internet Access")
+        print_output("---------------")
+        print_output("Web Interface URL: https://cloud.egeoffrey.com")
+        print_output("Login information:")
+        print_output("  - Gateway:")
+        print_output("    - Hostname: "+ENV["REMOTE_EGEOFFREY_GATEWAY_HOSTNAME"])
+        print_output("    - Port: 443")
+        print_output("    - Use SSL: yes")
+        print_output("  - House:")
+        print_output("    - House ID: "+ENV["REMOTE_EGEOFFREY_ID"])
+        print_output("    - Passcode: "+ENV["REMOTE_EGEOFFREY_PASSCODE"])
+        print_output("  - User:")
+        print_output("    - Username: your configured user or the default admin/admin and guest/<empty>")
+        print_output("    - Password: your configured user or the default admin/admin and guest/<empty>")
+
 # update an installed packages
 elif COMMAND == "update":
     packages = ARGUMENTS.split(" ") if ARGUMENTS != "" else []
