@@ -14,7 +14,7 @@ import socket
 ## constants
 BRANCH = "master"
 VERSION = 1.0
-REVISION = 29
+REVISION = 30
 MARKETPLACE_URL = "https://marketplace.egeoffrey.com/cache/marketplace_cache.json"
 SUPPORTED_CACHE_SCHEMA = 1
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/version.yml"
@@ -535,7 +535,7 @@ elif COMMAND == "setup":
     # ask if connecting to the cloud gateway
     user_input = request_input("- Do you want to access your eGeoffrey instance remotely, from outside your local network? (requires a user account on https://www.egeoffrey.com) (y/n) [n]", "^[yn]$", "n")
     if user_input == "y":
-        ENV["EGEOFFREY_ID"] = request_input("- What is your eGeoffrey username or email address?", "^[a-zA-Z0-9-_\.]+@[a-zA-Z0-9-_\.]+\.[a-zA-Z]+$")
+        ENV["EGEOFFREY_ID"] = request_input("- What is your eGeoffrey username or email address?", "^[a-zA-Z0-9-_\.@]+$")
         ENV["EGEOFFREY_GUI_ID"] = ENV["EGEOFFREY_ID"]
         ENV["REMOTE_EGEOFFREY_ID"] = ENV["EGEOFFREY_ID"]
         ENV["REMOTE_EGEOFFREY_GATEWAY_HOSTNAME"] = "gateway.egeoffrey.com"
@@ -592,13 +592,13 @@ elif COMMAND == "summary":
     passcode = ENV["EGEOFFREY_PASSCODE"] if "EGEOFFREY_PASSCODE" in ENV else "<empty>"
     print_output("    - Passcode: "+passcode)
     print_output("  - User:")
-    print_output("    - Username: your configured user or the default admin/admin and guest/<empty>")
-    print_output("    - Password: your configured user or the default admin/admin and guest/<empty>")
+    print_output("    - Username: admin or guest")
+    print_output("    - Password: admin for the admin user, <empty> for guest")
     if "REMOTE_EGEOFFREY_GATEWAY_HOSTNAME" in ENV:
         print_output("")
         print_output("Internet Access")
         print_output("---------------")
-        print_output("Web Interface URL: https://cloud.egeoffrey.com")
+        print_output("Web Interface URL: http://cloud.egeoffrey.com")
         print_output("Login information:")
         print_output("  - Gateway:")
         print_output("    - Hostname: "+ENV["REMOTE_EGEOFFREY_GATEWAY_HOSTNAME"])
@@ -608,8 +608,8 @@ elif COMMAND == "summary":
         print_output("    - House ID: "+ENV["REMOTE_EGEOFFREY_ID"])
         print_output("    - Passcode: "+ENV["REMOTE_EGEOFFREY_PASSCODE"])
         print_output("  - User:")
-        print_output("    - Username: your configured user or the default admin/admin and guest/<empty>")
-        print_output("    - Password: your configured user or the default admin/admin and guest/<empty>")
+        print_output("    - Username: admin or guest")
+        print_output("    - Password: admin for the admin user, <empty> for guest")
 
 # update an installed packages
 elif COMMAND == "update":
