@@ -14,11 +14,12 @@ import socket
 ## constants
 BRANCH = "master"
 VERSION = 1.0
-REVISION = 30
+REVISION = 31
 MARKETPLACE_URL = "https://marketplace.egeoffrey.com/cache/marketplace_cache.json"
 SUPPORTED_CACHE_SCHEMA = 1
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/version.yml"
 MY_DOWNLOAD_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/egeoffrey-cli"
+AUTH_URL = "https://api.egeoffrey.com/api/v1/auth/on_register_hook"
 MY_DIRECTORY = os.getcwd()
 DOCKER_COMPOSE = "docker-compose.yml"
 SUPPORTED_MANIFEST_SCHEMA = 2
@@ -341,7 +342,7 @@ parse_command_line()
 # check if running the latest version
 if not OFFLINE and COMMAND != "upgrade":
     version = requires_upgrade()
-    if version is not None: print_warning("a new version of egeoffrey-cli is available ("+version+"), run 'egeoffrey-cli upgrade' to upgrade")
+    if version is not None: print_warning("a new version of egeoffrey-cli is available ("+version+"), run 'sudo egeoffrey-cli upgrade' to upgrade")
 
 # do what requested by the user
 
@@ -527,23 +528,43 @@ elif COMMAND == "setup":
             }
         }
         save_configuration()
-    # local gateway
-    ENV["EGEOFFREY_GATEWAY_HOSTNAME"] = "egeoffrey-gateway"
-    ENV["EGEOFFREY_GATEWAY_PORT"] = "443"
-    ENV["EGEOFFREY_GATEWAY_TRANSPORT"] = "websockets"
-    ENV["EGEOFFREY_GATEWAY_SSL"] = 0
-    # ask if connecting to the cloud gateway
-    user_input = request_input("- Do you want to access your eGeoffrey instance remotely, from outside your local network? (requires a user account on https://www.egeoffrey.com) (y/n) [n]", "^[yn]$", "n")
-    if user_input == "y":
-        ENV["EGEOFFREY_ID"] = request_input("- What is your eGeoffrey username or email address?", "^[a-zA-Z0-9-_\.@]+$")
-        ENV["EGEOFFREY_GUI_ID"] = ENV["EGEOFFREY_ID"]
-        ENV["REMOTE_EGEOFFREY_ID"] = ENV["EGEOFFREY_ID"]
-        ENV["REMOTE_EGEOFFREY_GATEWAY_HOSTNAME"] = "gateway.egeoffrey.com"
-        ENV["REMOTE_EGEOFFREY_GATEWAY_PORT"] = 8883
-        ENV["REMOTE_EGEOFFREY_GATEWAY_SSL"] = 1
-        ENV["REMOTE_EGEOFFREY_PASSCODE"] = request_input("- What is the password of your eGeoffrey account?", ".+")
-    else:
-        ENV["EGEOFFREY_ID"] = "house"
+    configuration_ok = False
+    while not configuration_ok:
+        # local gateway
+        ENV["EGEOFFREY_GATEWAY_HOSTNAME"] = "egeoffrey-gateway"
+        ENV["EGEOFFREY_GATEWAY_PORT"] = "443"
+        ENV["EGEOFFREY_GATEWAY_TRANSPORT"] = "websockets"
+        ENV["EGEOFFREY_GATEWAY_SSL"] = 0
+        # ask if connecting to the cloud gateway
+        user_input = request_input("- Do you want to access your eGeoffrey instance remotely, from outside your local network? (requires a user account on https://www.egeoffrey.com) (y/n) [n]", "^[yn]$", "n")
+        if user_input == "y":
+            ENV["EGEOFFREY_ID"] = request_input("- What is your eGeoffrey username or email address?", "^[a-zA-Z0-9-_\.@]+$")
+            ENV["EGEOFFREY_GUI_ID"] = ENV["EGEOFFREY_ID"]
+            ENV["REMOTE_EGEOFFREY_ID"] = ENV["EGEOFFREY_ID"]
+            ENV["REMOTE_EGEOFFREY_GATEWAY_HOSTNAME"] = "gateway.egeoffrey.com"
+            ENV["REMOTE_EGEOFFREY_GATEWAY_PORT"] = 8883
+            ENV["REMOTE_EGEOFFREY_GATEWAY_SSL"] = 1
+            ENV["REMOTE_EGEOFFREY_PASSCODE"] = request_input("- What is the password of your eGeoffrey account?", ".+")
+            request = {
+                "username": ENV["REMOTE_EGEOFFREY_ID"],
+                "password": ENV["REMOTE_EGEOFFREY_PASSCODE"],
+                "app": "egeoffrey-cli"
+            }
+            # verify the provided credentials
+            try:
+                response = requests.post(AUTH_URL, data=json.dumps(request))
+                response = json.loads(response.text)
+                if "result" not in response:
+                    print_warning("Unable to verify the provided credentials")
+                if response["result"] == "ok":
+                    configuration_ok = True
+                else:
+                    print_warning("Invalid eGeoffrey credentials provided: "+str(response["result"]["error"]))
+            except Exception,e:
+                print_warning("Unable to verify the provided credentials: "+str(e))
+        else:
+            configuration_ok = True
+            ENV["EGEOFFREY_ID"] = "house"
     # other environment file
     ENV["PYTHONUNBUFFERED"] = 1
     ENV["TZ"] = detect_timezone()
