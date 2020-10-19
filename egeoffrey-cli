@@ -14,7 +14,7 @@ import socket
 ## constants
 BRANCH = "master"
 VERSION = 1.0
-REVISION = 32
+REVISION = 33
 MARKETPLACE_URL = "https://marketplace.egeoffrey.com/cache/marketplace_cache.json"
 SUPPORTED_CACHE_SCHEMA = 1
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/version.yml"
@@ -384,20 +384,34 @@ elif COMMAND == "install":
     if len(packages) == 0: print_error("at least a package name must be provided")
     marketplace = get_marketplace()
     for package in packages:
-        package_name, package_branch = parse_package(package)
+        # if a manifest file from the local filesystem is provided, the package is local
+        install_from_file = True if package.endswith("manifest.yml") else False
+        # if the package is local, read the manifest file
+        if install_from_file:
+            manifest = read_manifest(package)
+            package_name = manifest["package"]
+            package_branch = manifest["branch"]
+        # if comes from the marketplace get the manifest from there
+        else:    
+            package_name, package_branch = parse_package(package)
+            # ensure package exists in the marketplace
+            if package_name not in marketplace["packages"]:
+                print_output(package_name+" not found in the marketplace, skipping")
+                continue
+            if package_branch not in marketplace["packages"][package_name]["branches"]:
+                print_output(package_branch+" branch not found in the marketplace, skipping")
+                continue
+            # get the manifest
+            manifest = marketplace["packages"][package_name]["branches"][package_branch]["manifest"]
         # ensure package is not already installed
         if package_name in CONFIG["services"]:
             print_output(package_name+" is already installed")
             continue
-        # ensure package exists in the marketplace
-        if package_name not in marketplace["packages"]:
-            print_output(package_name+" not found in the marketplace, skipping")
-            continue
         # add the package to the docker-compose file
         try:
             service = {}
-            manifest = marketplace["packages"][package_name]["branches"][package_branch]["manifest"]
-            print_debug("Installing package "+package_name+":"+package_branch)
+            from_file = " (from "+package+")" if install_from_file else ""
+            print_debug("Installing package "+package_name+":"+package_branch+from_file)
             # if runtime parameters are provided, merge them with the service
             if "container_config" in manifest: 
                 print_debug("Container default runtime: "+str(manifest["container_config"]))
