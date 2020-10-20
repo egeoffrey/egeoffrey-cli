@@ -14,7 +14,7 @@ import socket
 ## constants
 BRANCH = "master"
 VERSION = 1.0
-REVISION = 34
+REVISION = 35
 MARKETPLACE_URL = "https://marketplace.egeoffrey.com/cache/marketplace_cache.json"
 SUPPORTED_CACHE_SCHEMA = 1
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/version.yml"
@@ -815,11 +815,11 @@ elif COMMAND == "build" or  COMMAND == "build_sdk":
             image_branch = manifest["dockerhub"]+":"+manifest["branch"]+"-"+architecture
             image_version = manifest["dockerhub"]+":"+str(manifest["version"])+"-"+architecture
             sdk_branch = manifest["sdk_branch"] if "sdk_branch" in manifest else "master"
-            args = ["buildx", "build", "--rm", "--platform", platform, "--build-arg", "SDK_VERSION="+sdk_branch, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image_branch, MY_DIRECTORY]
+            args = ["buildx", "build", "--rm", "--load", "--platform", platform, "--build-arg", "SDK_VERSION="+sdk_branch, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image_branch, MY_DIRECTORY]
         elif COMMAND == "build_sdk":
             image_branch = manifest["dockerhub"]+"-"+sdk_image+":"+manifest["branch"]+"-"+architecture
             image_version = manifest["dockerhub"]+"-"+sdk_image+":"+str(manifest["version"])+"-"+architecture
-            args = ["buildx", "build", "--rm", "--platform", platform, "--file", MY_DIRECTORY+"/Dockerfile-"+sdk_image, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image_branch, MY_DIRECTORY]
+            args = ["buildx", "build", "--rm", "--load", "--platform", platform, "--file", MY_DIRECTORY+"/Dockerfile-"+sdk_image, "--build-arg", "ARCHITECTURE="+architecture, "--tag", image_branch, MY_DIRECTORY]
         # if on master, also tag the image with the version number
         if manifest["branch"] == "master": 
             args.extend(["--tag", image_version])
