@@ -14,12 +14,13 @@ import socket
 ## constants
 BRANCH = "master"
 VERSION = 1.0
-REVISION = 35
+REVISION = 36
 MARKETPLACE_URL = "https://marketplace.egeoffrey.com/cache/marketplace_cache.json"
 SUPPORTED_CACHE_SCHEMA = 1
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/version.yml"
 MY_DOWNLOAD_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/egeoffrey-cli"
 AUTH_URL = "https://api.egeoffrey.com/api/v1/auth/on_register_hook"
+BUILD_WORKFLOW_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-actions/master/.github/workflows/build.yml"
 MY_DIRECTORY = os.getcwd()
 DOCKER_COMPOSE = "docker-compose.yml"
 SUPPORTED_MANIFEST_SCHEMA = 2
@@ -690,6 +691,14 @@ elif COMMAND == "commit" or COMMAND == "commit_sdk":
         if line.startswith("* "): branch = line.replace("* ","")
     if branch is not None and branch != manifest["branch"]: 
         print_warning(MY_DIRECTORY+" current branch does not match with the manifest's branch")
+    # download/update the build workflow
+    if COMMAND == "commit":
+        # create the workflows directory if not already there
+        if not os.path.isdir(MY_DIRECTORY+"/.github/workflows"):
+            run("mkdir -p "+MY_DIRECTORY+"/.github/workflows")
+        # download the latest version of the workflow and save it
+        if not OFFLINE:
+            run("wget --no-check-certificate "+BUILD_WORKFLOW_URL+" -O "+MY_DIRECTORY+"/.github/workflows/build.yml")
     if "nothing to commit" not in run_git(["status"]) or FORCE:
         # ask the user before proceeding
         if not QUITE:
