@@ -14,13 +14,14 @@ import socket
 ## constants
 BRANCH = "master"
 VERSION = 1.0
-REVISION = 36
+REVISION = 37
 MARKETPLACE_URL = "https://marketplace.egeoffrey.com/cache/marketplace_cache.json"
 SUPPORTED_CACHE_SCHEMA = 1
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/version.yml"
 MY_DOWNLOAD_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/egeoffrey-cli"
 AUTH_URL = "https://api.egeoffrey.com/api/v1/auth/on_register_hook"
 BUILD_WORKFLOW_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-actions/master/.github/workflows/build.yml"
+BUILD_SDK_WORKFLOW_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-actions/master/.github/workflows/build_sdk.yml"
 MY_DIRECTORY = os.getcwd()
 DOCKER_COMPOSE = "docker-compose.yml"
 SUPPORTED_MANIFEST_SCHEMA = 2
@@ -319,9 +320,12 @@ def print_usage():
     print_output("  logs [<package(s)>]                  Print out log information")
     print_output("  logs_tail [<package(s)>]             Print out log information and tail the log file")
     print_output("  reload                               Reload the configuration")
+    print_output("  restart [<package(s)>]               Restart all or a subset of running packages")
     print_output("  search <string> [branch]             Search packages matching the provided description")
     print_output("  set_modules <package_name> <modules> Reconfigure an installed package with the provided list of modules")
+    print_output("  set_env <variable> [<value>]         Set a global environment variable")
     print_output("  setup                                Initialize the installation directory and setup eGeoffrey")
+    print_output("  show_config                          Displays the current configuration")
     print_output("  start [<package(s)>]                 Start configured services")
     print_output("  stats                                Print out running packages CPU and memory utilization")
     print_output("  status                               Show currently running components")
@@ -333,12 +337,14 @@ def print_usage():
     print_output("Developer Commands:")
     print_output("  build [<architectures>]              Build a docker image and push it upstream")
     print_output("  build_sdk <image> [<architectures>]  Build a SDK docker image and push it upstream")
+    print_output("  change_branch <branch_name>          Checkout into a different existing branch")
     print_output("  commit '<description>'               Commit changes to the local and remote git repository")
     print_output("  commit_sdk '<description>'           Commit SDK changes to the local and remote git repository")
     print_output("  init_repo <type> <name> <git_user>   Create a local empty repository and set a remote upstream URL")
     print_output("  make_collection                      Create a collection including the configured packages")
     print_output("  merge                                Merge the current branch into master")
     print_output("  new_branch <branch_name>             Switch to a different branch")
+    print_output("  new_branch_sdk <branch_name>         Switch SDK to a different branch")
     print_output("  new_version <version>                Switch to a new version")
 
         
@@ -498,6 +504,11 @@ elif COMMAND == "logs" or COMMAND == "logs_tail":
 elif COMMAND == "reload":
     run_docker_compose(["up", "-d", "--remove-orphans"])
 
+# restart services
+elif COMMAND == "restart":
+    packages = ARGUMENTS.split(" ") if ARGUMENTS != "" else []
+    run_docker_compose(["up", "-d", "--remove-orphans", "--force-recreate"]+packages)
+
 # search for a package
 elif COMMAND == "search":
     search = ARGUMENTS.split(" ")
@@ -531,6 +542,26 @@ elif COMMAND == "set_modules":
     if not found: CONFIG["services"][package]["environment"].append("EGEOFFREY_MODULES="+modules)
     print_output("Set to package "+package+" the following modules: "+modules)
     save_configuration()
+
+# set a global environment variable
+elif COMMAND == "set_env":
+    load_env()
+    arguments = ARGUMENTS.split(" ")
+    value = None
+    if len(arguments) == 0 or len(arguments) > 2: print_error("a variable and optionally a value must be provided")
+    variable = arguments[0]
+    if len(arguments) == 2: value = arguments[1]
+    if value is None:
+        if variable in ENV:
+            del ENV[variable]
+            print_output("Deleted environment variable "+variable)
+            save_env()
+        else:
+            print_error("environment variable "+variable+" not set")
+    else:
+        ENV[variable] = value
+        print_output("Set environment variable "+variable+" to value "+value)
+        save_env()
 
 # initialize and setup eGeoffrey
 elif COMMAND == "setup":
@@ -596,6 +627,15 @@ elif COMMAND == "setup":
     print_output("The setup of your house in eGeoffrey is now complete!")
     print_output("If you need to change any of the information just provided, run 'sudo egeoffrey-cli setup'")
     
+# Displays the current configuration
+elif COMMAND == "show_config":
+    load_configuration()
+    print_output("== GLOBAL VARIABLES ==")
+    print_output(yaml.safe_dump(ENV, default_flow_style=False))
+    print_output("")
+    print_output("== CONFIGURATION ==")
+    print_output(yaml.safe_dump(CONFIG, default_flow_style=False))
+
 # start services
 elif COMMAND == "start":
     packages = ARGUMENTS.split(" ") if ARGUMENTS != "" else []
@@ -691,14 +731,15 @@ elif COMMAND == "commit" or COMMAND == "commit_sdk":
         if line.startswith("* "): branch = line.replace("* ","")
     if branch is not None and branch != manifest["branch"]: 
         print_warning(MY_DIRECTORY+" current branch does not match with the manifest's branch")
+    # create the workflows directory if not already there
+    if not os.path.isdir(MY_DIRECTORY+"/.github/workflows"):
+        run("mkdir -p "+MY_DIRECTORY+"/.github/workflows")
     # download/update the build workflow
-    if COMMAND == "commit":
-        # create the workflows directory if not already there
-        if not os.path.isdir(MY_DIRECTORY+"/.github/workflows"):
-            run("mkdir -p "+MY_DIRECTORY+"/.github/workflows")
-        # download the latest version of the workflow and save it
-        if not OFFLINE:
+    if not OFFLINE:
+        if COMMAND == "commit":
             run("wget --no-check-certificate "+BUILD_WORKFLOW_URL+" -O "+MY_DIRECTORY+"/.github/workflows/build.yml")
+        if COMMAND == "commit_sdk":
+            run("wget --no-check-certificate "+BUILD_SDK_WORKFLOW_URL+" -O "+MY_DIRECTORY+"/.github/workflows/build_sdk.yml")
     if "nothing to commit" not in run_git(["status"]) or FORCE:
         # ask the user before proceeding
         if not QUITE:
@@ -839,7 +880,13 @@ elif COMMAND == "build" or  COMMAND == "build_sdk":
             run_docker(["push", image_branch])
             if manifest["branch"] == "master": 
                 run_docker(["push", image_version])
-            
+
+# checkout into a different existing branch
+elif COMMAND == "change_branch":
+    if ARGUMENTS == "": print_error("provide the name of a branch")
+    branch = ARGUMENTS
+    run_git(["checkout", branch])
+
 # initialize an emtpy repository and set remote url
 elif COMMAND == "init_repo":
     ARGUMENTS = ARGUMENTS.split(" ")
@@ -1282,7 +1329,7 @@ elif COMMAND == "merge":
     print_output("egeoffrey-cli commit has to be run to fully commit the changes")
     
 # swtich to a new branch
-elif COMMAND == "new_branch":
+elif COMMAND == "new_branch" or COMMAND == "new_branch_sdk":
     if ARGUMENTS == "": print_error("provide the name of a branch")
     branch = ARGUMENTS
     print_output("Switching to branch "+branch)
@@ -1296,13 +1343,20 @@ elif COMMAND == "new_branch":
     if branch in branches:
         run_git(["branch", "-D", branch])
         # delete the remote branch
-        if not OFFLINE: run_git(["push", "origin", "--delete", branch])
+        if not OFFLINE:
+            # ensure there is a remote branch with this name before deleting it
+            run_git(["fetch"])
+            remotes = run_git(["branch", "--remote"])
+            if "origin/"+str(branch) in remotes:
+                run_git(["push", "origin", "--delete", branch])
     # update manifest file
-    manifest = read_manifest(MY_DIRECTORY+"/manifest.yml")
+    manifest_file = MY_DIRECTORY+"/manifest.yml"
+    if COMMAND == "new_branch_sdk": manifest_file = MY_DIRECTORY+"/sdk/manifest.yml"
+    manifest = read_manifest(manifest_file)
     if manifest["branch"] == branch:
         print_error("Already on branch "+branch)
     manifest["branch"] = branch
-    save_manifest(MY_DIRECTORY+"/manifest.yml", manifest)
+    save_manifest(manifest_file, manifest)
     # checkout on new branch
     run_git(["checkout", "-b", branch])
     
