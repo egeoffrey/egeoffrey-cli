@@ -14,7 +14,7 @@ import socket
 ## constants
 BRANCH = "master"
 VERSION = 1.0
-REVISION = 37
+REVISION = 38
 MARKETPLACE_URL = "https://marketplace.egeoffrey.com/cache/marketplace_cache.json"
 SUPPORTED_CACHE_SCHEMA = 1
 MY_MANIFEST_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+BRANCH+"/version.yml"
@@ -343,9 +343,11 @@ def print_usage():
     print_output("  init_repo <type> <name> <git_user>   Create a local empty repository and set a remote upstream URL")
     print_output("  make_collection                      Create a collection including the configured packages")
     print_output("  merge                                Merge the current branch into master")
+    print_output("  merge_sdk                            Merge the current SDK branch into master")
     print_output("  new_branch <branch_name>             Switch to a different branch")
     print_output("  new_branch_sdk <branch_name>         Switch SDK to a different branch")
     print_output("  new_version <version>                Switch to a new version")
+    print_output("  new_version_sdk <version>            Switch to a new SDK version")
 
         
 ## MAIN - END-USER ##
@@ -1303,7 +1305,7 @@ elif COMMAND == "make_collection":
     run("rm -rf "+build_dir)
     
 # merge the current branch into master
-elif COMMAND == "merge":
+elif COMMAND == "merge" or COMMAND == "merge_sdk":
     # get the current branch
     output = run_git(["branch"])
     branch = None
@@ -1318,14 +1320,16 @@ elif COMMAND == "merge":
     # merge the current branch into master without comming the changes
     run_git(["merge", branch, "--no-commit", "--no-ff"])
     # read the current manifest
-    manifest = read_manifest(MY_DIRECTORY+"/manifest.yml")
+    manifest_file = MY_DIRECTORY+"/manifest.yml"
+    if COMMAND == "merge_sdk": manifest_file = MY_DIRECTORY+"/sdk/manifest.yml"
+    manifest = read_manifest(manifest_file)
     # set the branch back to master and save
     manifest["branch"] = "master"
-    save_manifest(MY_DIRECTORY+"/manifest.yml", manifest)
+    save_manifest(manifest_file, manifest)
     # delete the old branch
-    run_git(["branch", "-D", branch])
+    # run_git(["branch", "-D", branch])
     # delete the remote branch
-    if not OFFLINE: run_git(["push", "origin", "--delete", branch])
+    # if not OFFLINE: run_git(["push", "origin", "--delete", branch])
     print_output("egeoffrey-cli commit has to be run to fully commit the changes")
     
 # swtich to a new branch
@@ -1361,17 +1365,19 @@ elif COMMAND == "new_branch" or COMMAND == "new_branch_sdk":
     run_git(["checkout", "-b", branch])
     
 # swtich to a new version
-elif COMMAND == "new_version":
+elif COMMAND == "new_version" or COMMAND == "new_version_sdk":
     if ARGUMENTS == "": print_error("provide the new version")
     version = ARGUMENTS
     print_output("Switching to version v"+version)
     # update manifest file
-    manifest = read_manifest(MY_DIRECTORY+"/manifest.yml")
+    manifest_file = MY_DIRECTORY+"/manifest.yml"
+    if COMMAND == "new_version_sdk": manifest_file = MY_DIRECTORY+"/sdk/manifest.yml"
+    manifest = read_manifest(manifest_file)
     if manifest["version"] == version:
         print_error("Already on version "+version)
     manifest["version"] = float(version)
     manifest["revision"] = 0
-    save_manifest(MY_DIRECTORY+"/manifest.yml", manifest)
+    save_manifest(manifest_file, manifest)
     
 ## MAIN - GENERAL ##
 
