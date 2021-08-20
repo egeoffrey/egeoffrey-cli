@@ -49,6 +49,8 @@ class cli():
         # force a specific action
         self.FORCE = False
 
+    ## HELPERS FUNCTIONS ##
+
     # print out an error message and exit
     def print_error(self, message):
         print("\033[91mERROR\033[0m: "+str(message))
@@ -65,50 +67,6 @@ class cli():
     # print out a message    
     def print_output(self, message):
         print(message)
-
-    # parse command line arguments
-    def parse_command_line(self):
-        skip_next = False
-        for i in range(1, len(sys.argv)):
-            if skip_next: 
-                skip_next = False
-                continue
-            arg = sys.argv[i]
-            arg = re.sub(' +',' ', arg)
-            if arg == "-d":
-                self.MY_DIRECTORY = sys.argv[i+1].rstrip("/")
-                skip_next = True
-                continue
-            if arg == "-c":
-                self.DOCKER_COMPOSE = sys.argv[i+1]
-                skip_next = True
-                continue
-            if arg == "-v":
-                self.DEBUG = True
-                continue
-            if arg == "-f":
-                self.FORCE = True
-                continue
-            if arg == "-o":
-                self.OFFLINE = True
-                continue
-            if arg == "-q":
-                self.QUITE = True
-                continue
-            if self.SCOPE == "":
-                self.SCOPE = arg
-                continue
-            if self.COMMAND == "":
-                self.COMMAND = arg
-                continue
-            self.ARGUMENTS = self.ARGUMENTS+" "+arg
-        self.ARGUMENTS = self.ARGUMENTS.strip()
-        self.print_debug("Base directory: "+self.MY_DIRECTORY)
-        self.print_debug("Scope: "+self.SCOPE)
-        self.print_debug("Command: "+self.COMMAND)
-        self.print_debug("Arguments: "+self.ARGUMENTS)
-
-    ## HELPERS FUNCTIONS ##
 
     # check if the cli requires to be upgraded
     def requires_upgrade(self):
@@ -301,75 +259,6 @@ class cli():
                 else:
                     self.print_warning("The input provided '"+user_input+"' is not valid")
         return user_input
-    
-    # print usage
-    def print_usage(self):
-        self.print_output("egeoffrey-cli v"+str(self.VERSION)+"-"+str(self.REVISION)+" ("+str(self.BRANCH)+")")
-        self.print_output("Usage: egeoffrey-cli [OPTIONS] SCOPE COMMAND ARGUMENTS")
-        self.print_output("")
-        self.print_output("Options:")
-        self.print_output("  -d <directory>                           Set the working directory")
-        self.print_output("  -c <filename>                            Set path of custom docker-compose.yml filename")
-        self.print_output("  -v                                       Enable DEBUG output")
-        self.print_output("  -q                                       Quite mode - do not run interactively")
-        self.print_output("  -o                                       Offline mode")
-        self.print_output("  -f                                       Force an action")
-        self.print_output("")
-        self.print_output("HOUSE scope commands:")
-        self.print_output("  house start [<package(s)>]               Start configured packages")
-        self.print_output("  house status                             Show currently running components")
-        self.print_output("  house stop                               Stop all running packages")
-        self.print_output("  house reload                             Reload the configuration")
-        self.print_output("  house restart [<package(s)>]             Restart all or a subset of running packages")
-        self.print_output("  house stats                              Print out running packages CPU and memory utilization")
-        self.print_output("  house logs [<package(s)>]                Print out log information")
-        self.print_output("  house logs_tail [<package(s)>]           Print out log information and tail the log file")
-        self.print_output("")
-        self.print_output("CONFIG scope commands:")
-        self.print_output("  config setup                             Initialize the installation directory and setup eGeoffrey")
-        self.print_output("  config summary                           Displays information regarding the current setup")
-        self.print_output("  config modules <package_name> <modules>  Reconfigure an installed package with the provided list of modules")
-        self.print_output("  config env <variable> [<value>]          Set a global environment variable")
-        self.print_output("  config dump                              Displays the current raw configuration")
-        self.print_output("")
-        self.print_output("PACKAGE scope commands:")
-        self.print_output("  package install <package(s)>             Install the provided package(s)")
-        self.print_output("  package uninstall <package(s)>           Uninstall the provided package(s)")
-        self.print_output("  package info <package>                   Print out information on a given package")
-        self.print_output("  package search <string> [branch]         Search packages matching the provided description")
-        self.print_output("  package update [<package(s)>]            Update all/selected installed package(s)")
-        self.print_output("  package available [<branch>]             List available packages that can be installed")
-        self.print_output("  package installed                        List already installed packages")
-        self.print_output("")
-        self.print_output("REPO scope commands:")
-        self.print_output("  repo init <type> <name> <git_user>       Create a local empty repository and set a remote upstream URL")
-        self.print_output("  repo commit '<description>'              Commit changes to the local and remote git repository")
-        self.print_output("  repo build [<architectures>]             Build a docker image and push it upstream")
-        self.print_output("  repo status                              Show the status of the repository")
-        self.print_output("  repo checkout <branch_name>              Checkout into a different existing branch")
-        self.print_output("  repo branch <branch_name>                Switch to a different branch")
-        self.print_output("  repo version <version>                   Switch to a new version")
-        self.print_output("  repo merge                               Merge the current branch into master")
-        self.print_output("  repo collection                          Create a collection including the configured packages")
-        self.print_output("")
-        self.print_output("SDK scope commands:")
-        self.print_output("  sdk commit '<description>'               Commit SDK changes to the local and remote git repository")
-        self.print_output("  sdk build <image> [<architectures>]      Build a SDK docker image and push it upstream")
-        self.print_output("  sdk status                               Show the status of the repository")
-        self.print_output("  sdk checkout <branch_name>               Checkout into a different existing branch")
-        self.print_output("  sdk branch <branch_name>                 Switch SDK to a different branch")    
-        self.print_output("  sdk version <version>                    Switch to a new SDK version")
-        self.print_output("  sdk merge                                Merge the current SDK branch into master")
-        self.print_output("")
-        self.print_output("CLI scope commands:")
-        self.print_output("  cli upgrade                              Upgrade egeoffrey-cli to the latest version")
-        self.print_output("  cli version                              Print out this script version")
-
-    # check if running the latest version
-    def check_updates(self):
-        if self.CHECK_CLI_UPDATES and not self.OFFLINE and self.COMMAND != "upgrade":
-            version = self.requires_upgrade()
-            if version is not None: self.print_warning("a new version of egeoffrey-cli is available ("+version+"), run 'sudo egeoffrey-cli cli upgrade' to upgrade")
 
     ## PACKAGE SCOPE FUNCTIONS ##
 
@@ -1446,10 +1335,138 @@ class """+name.capitalize()+"""("""+type.capitalize()+"""):
         else:
             self.print_output("Already at the latest version - v"+str(self.VERSION)+"-"+str(self.REVISION)+" ("+str(self.BRANCH)+")")
 
-
     # print out this script version
     def cli_version(self):
         self.print_output("egeoffrey-cli v"+str(self.VERSION)+"-"+str(self.REVISION)+" ("+str(self.BRANCH)+")")
+
+    ## CORE FUNCTIONS ##
+
+    # parse command line arguments
+    def parse_command_line(self):
+        skip_next = False
+        for i in range(1, len(sys.argv)):
+            if skip_next: 
+                skip_next = False
+                continue
+            arg = sys.argv[i]
+            arg = re.sub(' +',' ', arg)
+            if arg == "-d":
+                self.MY_DIRECTORY = sys.argv[i+1].rstrip("/")
+                skip_next = True
+                continue
+            if arg == "-c":
+                self.DOCKER_COMPOSE = sys.argv[i+1]
+                skip_next = True
+                continue
+            if arg == "-v":
+                self.DEBUG = True
+                continue
+            if arg == "-f":
+                self.FORCE = True
+                continue
+            if arg == "-o":
+                self.OFFLINE = True
+                continue
+            if arg == "-q":
+                self.QUITE = True
+                continue
+            if self.SCOPE == "":
+                self.SCOPE = arg
+                continue
+            if self.COMMAND == "":
+                self.COMMAND = arg
+                continue
+            self.ARGUMENTS = self.ARGUMENTS+" "+arg
+        self.ARGUMENTS = self.ARGUMENTS.strip()
+        self.print_debug("Base directory: "+self.MY_DIRECTORY)
+        self.print_debug("Scope: "+self.SCOPE)
+        self.print_debug("Command: "+self.COMMAND)
+        self.print_debug("Arguments: "+self.ARGUMENTS)
+
+
+    # load all the required python libraries
+    def check_requirements(self):
+        modules = ["sys", "os", "re", "time", "json", "yaml", "subprocess", "requests", "filecmp", "socket"]
+        # load importlib
+        try:
+            import importlib
+        except Exception as e:
+            self.print_error("Unable to load importlib: "+str(e))
+        # load all the other required modules
+        for module in modules:
+            try:
+                importlib.import_module(module)
+            except Exception as e:
+                self.print_error("required library "+module+" not found. Please install it by running 'pip3 install "+module+"'")
+
+    # check if running the latest version
+    def check_updates(self):
+        if self.CHECK_CLI_UPDATES and not self.OFFLINE and self.COMMAND != "upgrade":
+            version = self.requires_upgrade()
+            if version is not None: self.print_warning("a new version of egeoffrey-cli is available ("+version+"), run 'sudo egeoffrey-cli cli upgrade' to upgrade")
+    
+    # print usage
+    def print_usage(self):
+        self.print_output("egeoffrey-cli v"+str(self.VERSION)+"-"+str(self.REVISION)+" ("+str(self.BRANCH)+")")
+        self.print_output("Usage: egeoffrey-cli [OPTIONS] SCOPE COMMAND ARGUMENTS")
+        self.print_output("")
+        self.print_output("Options:")
+        self.print_output("  -d <directory>                           Set the working directory")
+        self.print_output("  -c <filename>                            Set path of custom docker-compose.yml filename")
+        self.print_output("  -v                                       Enable DEBUG output")
+        self.print_output("  -q                                       Quite mode - do not run interactively")
+        self.print_output("  -o                                       Offline mode")
+        self.print_output("  -f                                       Force an action")
+        self.print_output("")
+        self.print_output("HOUSE scope commands:")
+        self.print_output("  house start [<package(s)>]               Start configured packages")
+        self.print_output("  house status                             Show currently running components")
+        self.print_output("  house stop                               Stop all running packages")
+        self.print_output("  house reload                             Reload the configuration")
+        self.print_output("  house restart [<package(s)>]             Restart all or a subset of running packages")
+        self.print_output("  house stats                              Print out running packages CPU and memory utilization")
+        self.print_output("  house logs [<package(s)>]                Print out log information")
+        self.print_output("  house logs_tail [<package(s)>]           Print out log information and tail the log file")
+        self.print_output("")
+        self.print_output("CONFIG scope commands:")
+        self.print_output("  config setup                             Initialize the installation directory and setup eGeoffrey")
+        self.print_output("  config summary                           Displays information regarding the current setup")
+        self.print_output("  config modules <package_name> <modules>  Reconfigure an installed package with the provided list of modules")
+        self.print_output("  config env <variable> [<value>]          Set a global environment variable")
+        self.print_output("  config dump                              Displays the current raw configuration")
+        self.print_output("")
+        self.print_output("PACKAGE scope commands:")
+        self.print_output("  package install <package(s)>             Install the provided package(s)")
+        self.print_output("  package uninstall <package(s)>           Uninstall the provided package(s)")
+        self.print_output("  package info <package>                   Print out information on a given package")
+        self.print_output("  package search <string> [branch]         Search packages matching the provided description")
+        self.print_output("  package update [<package(s)>]            Update all/selected installed package(s)")
+        self.print_output("  package available [<branch>]             List available packages that can be installed")
+        self.print_output("  package installed                        List already installed packages")
+        self.print_output("")
+        self.print_output("REPO scope commands:")
+        self.print_output("  repo init <type> <name> <git_user>       Create a local empty repository and set a remote upstream URL")
+        self.print_output("  repo commit '<description>'              Commit changes to the local and remote git repository")
+        self.print_output("  repo build [<architectures>]             Build a docker image and push it upstream")
+        self.print_output("  repo status                              Show the status of the repository")
+        self.print_output("  repo checkout <branch_name>              Checkout into a different existing branch")
+        self.print_output("  repo branch <branch_name>                Switch to a different branch")
+        self.print_output("  repo version <version>                   Switch to a new version")
+        self.print_output("  repo merge                               Merge the current branch into master")
+        self.print_output("  repo collection                          Create a collection including the configured packages")
+        self.print_output("")
+        self.print_output("SDK scope commands:")
+        self.print_output("  sdk commit '<description>'               Commit SDK changes to the local and remote git repository")
+        self.print_output("  sdk build <image> [<architectures>]      Build a SDK docker image and push it upstream")
+        self.print_output("  sdk status                               Show the status of the repository")
+        self.print_output("  sdk checkout <branch_name>               Checkout into a different existing branch")
+        self.print_output("  sdk branch <branch_name>                 Switch SDK to a different branch")    
+        self.print_output("  sdk version <version>                    Switch to a new SDK version")
+        self.print_output("  sdk merge                                Merge the current SDK branch into master")
+        self.print_output("")
+        self.print_output("CLI scope commands:")
+        self.print_output("  cli upgrade                              Upgrade egeoffrey-cli to the latest version")
+        self.print_output("  cli version                              Print out this script version")
 
     # run the requested command
     def run_command(self):
@@ -1506,9 +1523,16 @@ class """+name.capitalize()+"""("""+type.capitalize()+"""):
         else:
             self.print_usage()
 
+## MAIN ##
+
+# create an instance of the cli
 cli = cli()
+# load required libraries
+cli.check_requirements()
 # parse provided command line
 cli.parse_command_line()
+# check for cli updates
 cli.check_updates()
+# run the command requested by the user
 cli.run_command()
 
