@@ -1,17 +1,12 @@
 #!/usr/bin/python3
 
-import sys
-import os
-import re
-import time
-import json
-import yaml
-import subprocess
-import requests
-import filecmp
-import socket
+### egeoffrey-cli
+# The egeoffrey-cli utility makes a number of complex tasks trivial for an eGeoffrey user or admin.
+# End users can leverage it for installing new eGeoffrey packages, starting/stopping eGeoffrey's components, searching for new packages in the marketplace, 
+# updating the software, etc.
+# Developers can leverage it for commiting changes to their modules or building the Docker image of their packages.
 
-
+# cli class
 class cli():
     def __init__(self):
         ## constants
@@ -1383,22 +1378,6 @@ class """+name.capitalize()+"""("""+type.capitalize()+"""):
         self.print_debug("Command: "+self.COMMAND)
         self.print_debug("Arguments: "+self.ARGUMENTS)
 
-
-    # load all the required python libraries
-    def check_requirements(self):
-        modules = ["sys", "os", "re", "time", "json", "yaml", "subprocess", "requests", "filecmp", "socket"]
-        # load importlib
-        try:
-            import importlib
-        except Exception as e:
-            self.print_error("Unable to load importlib: "+str(e))
-        # load all the other required modules
-        for module in modules:
-            try:
-                importlib.import_module(module)
-            except Exception as e:
-                self.print_error("required library "+module+" not found. Please install it by running 'pip3 install "+module+"'")
-
     # check if running the latest version
     def check_updates(self):
         if self.CHECK_CLI_UPDATES and not self.OFFLINE and self.COMMAND != "upgrade":
@@ -1525,10 +1504,22 @@ class """+name.capitalize()+"""("""+type.capitalize()+"""):
 
 ## MAIN ##
 
+# load required libraries
+modules = ["sys", "os", "re", "time", "json", "yaml", "subprocess", "requests", "filecmp", "socket"]
+# load importlib
+try:
+    import importlib
+except Exception as e:
+    cli.print_error("","Unable to load importlib: "+str(e))
+# load all the other required modules
+for module in modules:
+    try:
+        globals()[module] = importlib.import_module(module)
+    except Exception as e:
+        cli.print_error("","required library "+module+" not found. Please install it by running 'pip3 install "+module+"'")
+
 # create an instance of the cli
 cli = cli()
-# load required libraries
-cli.check_requirements()
 # parse provided command line
 cli.parse_command_line()
 # check for cli updates
