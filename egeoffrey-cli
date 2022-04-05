@@ -584,7 +584,7 @@ class cli():
         self.print_output(yaml.safe_dump(self.CONFIG, default_flow_style=False))
 
     # summary of the configuration
-    def config_show(self):
+    def config_summary(self):
         self.load_configuration()
         local_ip = self.detect_ip()
         self.print_output("eGeoffrey Configuration Summary")
@@ -1464,7 +1464,7 @@ class """+name.capitalize()+"""("""+type.capitalize()+"""):
             elif self.COMMAND == "env": self.config_env()
             elif self.COMMAND == "setup": self.config_setup()
             elif self.COMMAND == "dump": self.config_dump()
-            elif self.COMMAND == "show": self.config_show()
+            elif self.COMMAND == "summary": self.config_summary()
             else: self.print_usage()
         elif self.SCOPE == "package":
             if self.COMMAND == "info": self.package_info()
@@ -1516,7 +1516,7 @@ for module in modules:
     try:
         globals()[module] = importlib.import_module(module)
     except Exception as e:
-        cli.print_error("","required library "+module+" not found. Please install it by running 'pip3 install "+module+"'")
+        cli.print_error("","required library '"+module+"' not found. Please install the dependencies by running 'pip3 install pyyml requests'")
 
 # create an instance of the cli
 cli = cli()
