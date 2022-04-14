@@ -10,14 +10,13 @@
 class cli():
     def __init__(self):
         ## constants
-        self.BRANCH = "development"
-        self.VERSION = 1.1
+        self.BRANCH = "master"
+        self.VERSION = 1.2
         self.REVISION = 1
         self.MARKETPLACE_URL = "https://marketplace.egeoffrey.com/cache/marketplace_cache.json"
         self.SUPPORTED_CACHE_SCHEMA = 1
         self.MY_MANIFEST_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+self.BRANCH+"/version.yml"
         self.MY_DOWNLOAD_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-cli/"+self.BRANCH+"/egeoffrey-cli"
-        self.AUTH_URL = "https://api.egeoffrey.com/api/v1/auth/on_register_hook"
         self.BUILD_WORKFLOW_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-actions/master/.github/workflows/build.yml"
         self.BUILD_SDK_WORKFLOW_URL = "https://raw.githubusercontent.com/egeoffrey/egeoffrey-actions/master/.github/workflows/build_sdk.yml"
         self.MY_DIRECTORY = os.getcwd()
@@ -525,45 +524,12 @@ class cli():
                 }
             }
             self.save_configuration()
-        configuration_ok = False
-        while not configuration_ok:
-            # local gateway
-            self.ENV["EGEOFFREY_GATEWAY_HOSTNAME"] = "egeoffrey-gateway"
-            self.ENV["EGEOFFREY_GATEWAY_PORT"] = "443"
-            self.ENV["EGEOFFREY_GATEWAY_TRANSPORT"] = "websockets"
-            self.ENV["EGEOFFREY_GATEWAY_SSL"] = 0
-            self.ENV["EGEOFFREY_GATEWAY_VERSION"] = 1
-            # ask if connecting to the cloud gateway
-            user_input = self.request_input("- Do you want to access your eGeoffrey instance remotely, from outside your local network? (requires a user account on https://www.egeoffrey.com) (y/n) [n]", "EGEOFFREY_SETUP_REMOTE", "^[yn]$", "n")
-            if user_input == "y":
-                self.ENV["EGEOFFREY_ID"] = self.request_input("- What is your eGeoffrey username or email address?", "EGEOFFREY_ID", "^[a-zA-Z0-9-_\.@]+$")
-                self.ENV["EGEOFFREY_GATEWAY_VERSION"] = 2
-                self.ENV["EGEOFFREY_GUI_ID"] = self.ENV["EGEOFFREY_ID"]
-                self.ENV["REMOTE_EGEOFFREY_ID"] = self.ENV["EGEOFFREY_ID"]
-                self.ENV["REMOTE_EGEOFFREY_GATEWAY_HOSTNAME"] = "gateway.egeoffrey.com"
-                self.ENV["REMOTE_EGEOFFREY_GATEWAY_PORT"] = 8883
-                self.ENV["REMOTE_EGEOFFREY_GATEWAY_SSL"] = 1
-                self.ENV["REMOTE_EGEOFFREY_PASSCODE"] = self.request_input("- What is the password of your eGeoffrey account?", "REMOTE_EGEOFFREY_PASSCODE", ".+")
-                request = {
-                    "username": self.ENV["REMOTE_EGEOFFREY_ID"],
-                    "password": self.ENV["REMOTE_EGEOFFREY_PASSCODE"],
-                    "app": "egeoffrey-cli"
-                }
-                # verify the provided credentials
-                try:
-                    response = requests.post(self.AUTH_URL, data=json.dumps(request))
-                    response = json.loads(response.text)
-                    if "result" not in response:
-                        self.print_warning("Unable to verify the provided credentials")
-                    if response["result"] == "ok":
-                        configuration_ok = True
-                    else:
-                        self.print_warning("Invalid eGeoffrey credentials provided: "+str(response["result"]["error"]))
-                except Exception as e:
-                    self.print_warning("Unable to verify the provided credentials: "+str(e))
-            else:
-                configuration_ok = True
-                self.ENV["EGEOFFREY_ID"] = "house"
+        self.ENV["EGEOFFREY_GATEWAY_HOSTNAME"] = "egeoffrey-gateway"
+        self.ENV["EGEOFFREY_GATEWAY_PORT"] = "443"
+        self.ENV["EGEOFFREY_GATEWAY_TRANSPORT"] = "websockets"
+        self.ENV["EGEOFFREY_GATEWAY_SSL"] = 0
+        self.ENV["EGEOFFREY_GATEWAY_VERSION"] = 2
+        self.ENV["EGEOFFREY_ID"] = "house"
         # other environment file
         self.ENV["PYTHONUNBUFFERED"] = 1
         self.ENV["TZ"] = self.detect_timezone()
@@ -580,7 +546,7 @@ class cli():
         self.print_output("== GLOBAL VARIABLES ==")
         self.print_output(yaml.safe_dump(self.ENV, default_flow_style=False))
         self.print_output("")
-        self.print_output("== self.CONFIGURATION ==")
+        self.print_output("== CONFIGURATION ==")
         self.print_output(yaml.safe_dump(self.CONFIG, default_flow_style=False))
 
     # summary of the configuration
@@ -596,7 +562,7 @@ class cli():
         self.print_output("    - Hostname: "+hostname)
         port = str(self.ENV["EGEOFFREY_GATEWAY_PORT"]) if "EGEOFFREY_GATEWAY_PORT" in self.ENV else "443"
         self.print_output("    - Port: "+port)
-        ssl = "yes" if "EGEOFFREY_GATEWAY_SSL" in self.ENV and self.ENV["EGEOFFREY_GATEWAY_SSL"] == 1 else "no"
+        ssl = "yes" if "EGEOFFREY_GATEWAY_SSL" in self.ENV and int(self.ENV["EGEOFFREY_GATEWAY_SSL"]) == 1 else "no"
         self.print_output("    - Use SSL: "+ssl)
         version = "1" if "EGEOFFREY_GATEWAY_VERSION" not in self.ENV else self.ENV["EGEOFFREY_GATEWAY_VERSION"]
         self.print_output("    - Protocol Version: "+str(version))
@@ -610,14 +576,16 @@ class cli():
         self.print_output("    - Password: admin for the admin user, <empty> for guest")
         if "REMOTE_EGEOFFREY_GATEWAY_HOSTNAME" in self.ENV:
             self.print_output("")
-            self.print_output("Internet Access")
+            self.print_output("Remote Gateway")
             self.print_output("---------------")
             self.print_output("Web Interface URL: http://cloud.egeoffrey.com")
             self.print_output("Login information:")
             self.print_output("  - Gateway:")
             self.print_output("    - Hostname: "+self.ENV["REMOTE_EGEOFFREY_GATEWAY_HOSTNAME"])
-            self.print_output("    - Port: 443")
-            self.print_output("    - Use SSL: yes")
+            port = str(self.ENV["REMOTE_EGEOFFREY_GATEWAY_PORT"]) if "REMOTE_EGEOFFREY_GATEWAY_PORT" in self.ENV else "443"
+            self.print_output("    - Port: "+port)
+            ssl = "yes" if "REMOTE_EGEOFFREY_GATEWAY_SSL" in self.ENV and int(self.ENV["REMOTE_EGEOFFREY_GATEWAY_SSL"]) == 1 else "no"
+            self.print_output("    - Use SSL: "+ssl)
             self.print_output("  - House:")
             self.print_output("    - House ID: "+self.ENV["REMOTE_EGEOFFREY_ID"])
             self.print_output("    - Passcode: "+self.ENV["REMOTE_EGEOFFREY_PASSCODE"])
@@ -1193,7 +1161,7 @@ COPY . $WORKDIR"""
 ## DEPENDENCIES:
 # OS: 
 # Python: 
-## self.CONFIGURATION:
+## CONFIGURATION:
 # required: 
 # optional: 
 ## COMMUNICATION:
